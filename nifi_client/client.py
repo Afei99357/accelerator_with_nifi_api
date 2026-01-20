@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class AuthType(Enum):
     """Supported authentication types for NiFi API."""
+
     NONE = "none"
     BASIC = "basic"
     BEARER = "bearer"
@@ -45,6 +46,7 @@ class NiFiConnectionConfig:
         timeout: Request timeout in seconds
         max_retries: Maximum number of retry attempts
     """
+
     host: str
     port: int = 8080
     protocol: str = "https"
@@ -76,7 +78,9 @@ class NiFiConnectionConfig:
             raise ValueError(f"Invalid port: {self.port}")
 
         if self.protocol not in ("http", "https"):
-            raise ValueError(f"Protocol must be 'http' or 'https', got: {self.protocol}")
+            raise ValueError(
+                f"Protocol must be 'http' or 'https', got: {self.protocol}"
+            )
 
         if self.auth_type == AuthType.BASIC:
             if not self.username or not self.password:
@@ -88,17 +92,23 @@ class NiFiConnectionConfig:
 
         elif self.auth_type == AuthType.CERTIFICATE:
             if not self.cert_path or not self.key_path:
-                raise ValueError("Certificate and key paths required for certificate auth")
+                raise ValueError(
+                    "Certificate and key paths required for certificate auth"
+                )
             if not Path(self.cert_path).exists():
                 raise ValueError(f"Certificate file not found: {self.cert_path}")
             if not Path(self.key_path).exists():
                 raise ValueError(f"Key file not found: {self.key_path}")
 
         if self.timeout < 1 or self.timeout > 600:
-            raise ValueError(f"Timeout must be between 1 and 600 seconds, got: {self.timeout}")
+            raise ValueError(
+                f"Timeout must be between 1 and 600 seconds, got: {self.timeout}"
+            )
 
         if self.max_retries < 0 or self.max_retries > 10:
-            raise ValueError(f"Max retries must be between 0 and 10, got: {self.max_retries}")
+            raise ValueError(
+                f"Max retries must be between 0 and 10, got: {self.max_retries}"
+            )
 
 
 class NiFiClient:
@@ -138,7 +148,7 @@ class NiFiClient:
             total=self.config.max_retries,
             backoff_factor=2,  # 2s, 4s, 8s delays
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "HEAD", "OPTIONS"]
+            allowed_methods=["GET", "HEAD", "OPTIONS"],
         )
 
         adapter = HTTPAdapter(max_retries=retry_strategy)
@@ -150,9 +160,7 @@ class NiFiClient:
             session.auth = (self.config.username, self.config.password)
 
         elif self.config.auth_type == AuthType.BEARER:
-            session.headers.update({
-                "Authorization": f"Bearer {self.config.token}"
-            })
+            session.headers.update({"Authorization": f"Bearer {self.config.token}"})
 
         elif self.config.auth_type == AuthType.CERTIFICATE:
             session.cert = (self.config.cert_path, self.config.key_path)
@@ -166,7 +174,7 @@ class NiFiClient:
         backoff.expo,
         (requests.exceptions.Timeout, requests.exceptions.ConnectionError),
         max_tries=3,
-        max_time=60
+        max_time=60,
     )
     def test_connection(self) -> Dict[str, Any]:
         """Test connection to NiFi instance.
@@ -183,8 +191,7 @@ class NiFiClient:
         try:
             logger.info(f"Testing connection to {self.config.base_url}")
             response = self.session.get(
-                f"{self.config.base_url}/flow/about",
-                timeout=self.config.timeout
+                f"{self.config.base_url}/flow/about", timeout=self.config.timeout
             )
             response.raise_for_status()
 
@@ -195,7 +202,7 @@ class NiFiClient:
             return {
                 "success": True,
                 "version": version,
-                "message": f"Connected to NiFi {version}"
+                "message": f"Connected to NiFi {version}",
             }
 
         except requests.exceptions.HTTPError as e:
@@ -204,38 +211,29 @@ class NiFiClient:
             return {
                 "success": False,
                 "error": error_msg,
-                "status_code": e.response.status_code
+                "status_code": e.response.status_code,
             }
 
         except requests.exceptions.ConnectionError as e:
             error_msg = f"Connection error: {str(e)}"
             logger.error(f"Connection test failed: {error_msg}")
-            return {
-                "success": False,
-                "error": error_msg
-            }
+            return {"success": False, "error": error_msg}
 
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.Timeout:
             error_msg = f"Connection timeout after {self.config.timeout}s"
             logger.error(f"Connection test failed: {error_msg}")
-            return {
-                "success": False,
-                "error": error_msg
-            }
+            return {"success": False, "error": error_msg}
 
         except Exception as e:
             error_msg = f"Unexpected error: {str(e)}"
             logger.error(f"Connection test failed: {error_msg}")
-            return {
-                "success": False,
-                "error": error_msg
-            }
+            return {"success": False, "error": error_msg}
 
     @backoff.on_exception(
         backoff.expo,
         (requests.exceptions.Timeout, requests.exceptions.ConnectionError),
         max_tries=3,
-        max_time=300  # 5 minutes max for large flows
+        max_time=300,  # 5 minutes max for large flows
     )
     def fetch_flow(self, process_group_id: str = "root") -> Dict[str, Any]:
         """Fetch flow data from NiFi for a specific process group.
@@ -261,14 +259,13 @@ class NiFiClient:
 
         try:
             logger.info(f"Fetching flow for process group: {process_group_id}")
-            response = self.session.get(
-                endpoint,
-                timeout=self.config.timeout
-            )
+            response = self.session.get(endpoint, timeout=self.config.timeout)
             response.raise_for_status()
 
             flow_data = response.json()
-            logger.info(f"Successfully fetched flow for process group: {process_group_id}")
+            logger.info(
+                f"Successfully fetched flow for process group: {process_group_id}"
+            )
 
             return flow_data
 
@@ -287,7 +284,10 @@ class NiFiClient:
                 raise
 
         except requests.exceptions.Timeout as e:
-            error_msg = f"Fetch timeout after {self.config.timeout}s. Try increasing timeout for large flows."
+            error_msg = (
+                f"Fetch timeout after {self.config.timeout}s. "
+                "Try increasing timeout for large flows."
+            )
             logger.error(error_msg)
             raise TimeoutError(error_msg) from e
 
@@ -311,10 +311,7 @@ class NiFiClient:
 
         try:
             logger.info(f"Fetching process groups for parent: {parent_id}")
-            response = self.session.get(
-                endpoint,
-                timeout=self.config.timeout
-            )
+            response = self.session.get(endpoint, timeout=self.config.timeout)
             response.raise_for_status()
 
             return response.json()
@@ -375,7 +372,7 @@ def create_nifi_client_from_env() -> NiFiClient:
         key_path=os.getenv("NIFI_KEY_PATH"),
         verify_ssl=os.getenv("NIFI_VERIFY_SSL", "true").lower() == "true",
         timeout=int(os.getenv("NIFI_TIMEOUT", "30")),
-        max_retries=int(os.getenv("NIFI_MAX_RETRIES", "3"))
+        max_retries=int(os.getenv("NIFI_MAX_RETRIES", "3")),
     )
 
     return NiFiClient(config)

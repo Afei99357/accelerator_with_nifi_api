@@ -17,7 +17,7 @@ class IdMapper:
             "funnel": 0,
             "inputPort": 0,
             "outputPort": 0,
-            "connection": 0
+            "connection": 0,
         }
         self._forward_map: Dict[str, str] = {}  # original_id -> friendly_id
         self._reverse_map: Dict[str, str] = {}  # friendly_id -> original_id
@@ -38,7 +38,7 @@ class IdMapper:
             "funnel": "f",
             "inputPort": "ip",
             "outputPort": "op",
-            "connection": "c"
+            "connection": "c",
         }
 
         prefix = prefix_map.get(component_type)
@@ -64,7 +64,10 @@ class IdMapper:
         return self._forward_map.get(original_id, original_id)
 
     def lookup_or_map_by_type(self, original_id: str, component_type: str) -> str:
-        """Look up or map an ID based on component type. Used for connections that reference components."""
+        """Look up or map an ID based on component type.
+
+        Used for connections that reference components.
+        """
         if not original_id:
             return original_id
         # If already mapped, return it
@@ -79,10 +82,10 @@ class IdMapper:
 
 
 def _build_pass_through_connections(
-        all_connections: List[Dict[str, Any]],
-        pass_through_ids: set,
-        parent_group_id: str,
-        id_mapper: IdMapper
+    all_connections: List[Dict[str, Any]],
+    pass_through_ids: set,
+    parent_group_id: str,
+    id_mapper: IdMapper,
 ) -> List[Dict[str, Any]]:
     """
     Build pass-through connectivity by bypassing funnels, input ports, and output ports.
@@ -110,7 +113,9 @@ def _build_pass_through_connections(
                 incoming[dest_id] = []
             incoming[dest_id].append(conn)
 
-    def find_ultimate_sources(component_id: str, visited: set = None) -> List[Dict[str, Any]]:
+    def find_ultimate_sources(
+        component_id: str, visited: set = None
+    ) -> List[Dict[str, Any]]:
         """Find all ultimate sources (non-pass-through) that feed into this component."""
         if visited is None:
             visited = set()
@@ -133,8 +138,11 @@ def _build_pass_through_connections(
                 for conn in incoming.get(component_id, []):
                     # Use the destination info but with this component's ID
                     dest_info = conn.get("destination", {})
-                    source_info = {"id": component_id, "groupId": dest_info.get("groupId"),
-                                   "type": dest_info.get("type", "PROCESSOR")}
+                    source_info = {
+                        "id": component_id,
+                        "groupId": dest_info.get("groupId"),
+                        "type": dest_info.get("type", "PROCESSOR"),
+                    }
                     break
             if not source_info:
                 source_info = {"id": component_id, "groupId": None, "type": "PROCESSOR"}
@@ -149,7 +157,9 @@ def _build_pass_through_connections(
 
         return sources
 
-    def find_ultimate_destinations(component_id: str, visited: set = None) -> List[Dict[str, Any]]:
+    def find_ultimate_destinations(
+        component_id: str, visited: set = None
+    ) -> List[Dict[str, Any]]:
         """Find all ultimate destinations (non-pass-through) that this component feeds into."""
         if visited is None:
             visited = set()
@@ -160,8 +170,9 @@ def _build_pass_through_connections(
 
         # If this is not a pass-through component, it's an ultimate destination
         if component_id not in pass_through_ids:
-            # Get the destination info from a connection where this component is the destination (incoming)
-            # This gives us the correct type and groupId for this component as a destination
+            # Get the destination info from a connection where this component
+            # is the destination (incoming). This gives us the correct type
+            # and groupId for this component as a destination
             dest_info = None
             for conn in incoming.get(component_id, []):
                 dest_info = conn.get("destination", {}).copy()
@@ -172,8 +183,11 @@ def _build_pass_through_connections(
                 for conn in outgoing.get(component_id, []):
                     # Use the source info but with this component's ID
                     source_info = conn.get("source", {})
-                    dest_info = {"id": component_id, "groupId": source_info.get("groupId"),
-                                 "type": source_info.get("type", "PROCESSOR")}
+                    dest_info = {
+                        "id": component_id,
+                        "groupId": source_info.get("groupId"),
+                        "type": source_info.get("type", "PROCESSOR"),
+                    }
                     break
             if not dest_info:
                 dest_info = {"id": component_id, "groupId": None, "type": "PROCESSOR"}
@@ -214,7 +228,9 @@ def _build_pass_through_connections(
         if dest_id in pass_through_ids:
             ultimate_destinations = find_ultimate_destinations(dest_id)
         else:
-            ultimate_destinations = [{"id": dest_id, "destination": conn.get("destination", {})}]
+            ultimate_destinations = [
+                {"id": dest_id, "destination": conn.get("destination", {})}
+            ]
 
         # Create connections from all ultimate sources to all ultimate destinations
         for src_info in ultimate_sources:
@@ -241,17 +257,23 @@ def _build_pass_through_connections(
                 if "groupId" not in source_dict or source_dict["groupId"] is None:
                     source_dict["groupId"] = conn.get("source", {}).get("groupId")
                 if "type" not in source_dict or not source_dict["type"]:
-                    source_dict["type"] = conn.get("source", {}).get("type", "PROCESSOR")
+                    source_dict["type"] = conn.get("source", {}).get(
+                        "type", "PROCESSOR"
+                    )
 
                 if "groupId" not in dest_dict or dest_dict["groupId"] is None:
                     dest_dict["groupId"] = conn.get("destination", {}).get("groupId")
                 if "type" not in dest_dict or not dest_dict["type"]:
-                    dest_dict["type"] = conn.get("destination", {}).get("type", "PROCESSOR")
+                    dest_dict["type"] = conn.get("destination", {}).get(
+                        "type", "PROCESSOR"
+                    )
 
                 # Create new connection
                 new_conn = {
                     "componentType": "connection",
-                    "id": id_mapper.get_friendly_id(f"{src_id}->{dst_id}", "connection"),
+                    "id": id_mapper.get_friendly_id(
+                        f"{src_id}->{dst_id}", "connection"
+                    ),
                     "parentGroupId": parent_group_id,
                     "name": None,
                     "source": source_dict,

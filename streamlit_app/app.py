@@ -1,22 +1,19 @@
 """Streamlit web application for NiFi API Analyzer."""
 
-import streamlit as st
 import sys
 from pathlib import Path
+
+import streamlit as st
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from nifi_client.client import NiFiClient, NiFiConnectionConfig, AuthType
-from nifi_client.converter import convert_nifi_json_to_template_dto
+from nifi_client.client import AuthType, NiFiClient, NiFiConnectionConfig  # noqa: E402
+from nifi_client.converter import convert_nifi_json_to_template_dto  # noqa: E402
 
 
 def main():
-    st.set_page_config(
-        page_title="NiFi API Analyzer",
-        page_icon="🔄",
-        layout="wide"
-    )
+    st.set_page_config(page_title="NiFi API Analyzer", page_icon="🔄", layout="wide")
 
     st.title("🔄 NiFi API Analyzer")
     st.markdown("API-first NiFi flow analysis tool")
@@ -33,7 +30,7 @@ def main():
         auth_type = st.selectbox(
             "Auth Type",
             ["none", "basic", "bearer", "certificate"],
-            help="Authentication method"
+            help="Authentication method",
         )
 
         username = None
@@ -48,11 +45,30 @@ def main():
         elif auth_type == "bearer":
             token = st.text_input("Bearer Token", type="password")
         elif auth_type == "certificate":
-            cert_path = st.text_input("Certificate Path", placeholder="/path/to/cert.pem")
+            cert_path = st.text_input(
+                "Certificate Path", placeholder="/path/to/cert.pem"
+            )
             key_path = st.text_input("Key Path", placeholder="/path/to/key.pem")
 
         verify_ssl = st.checkbox("Verify SSL", value=True)
         timeout = st.slider("Timeout (seconds)", min_value=10, max_value=300, value=30)
+
+        st.divider()
+        st.subheader("Flow Selection")
+        process_group_id = st.text_input(
+            "Process Group ID",
+            value="root",
+            help="Process group ID to fetch (use 'root' for root process group)",
+        )
+        # Store in session state for use when fetching
+        st.session_state["process_group_id"] = process_group_id
+
+        filter_running = st.checkbox(
+            "Filter RUNNING processors only",
+            value=False,
+            help="If checked, only include processors in RUNNING state",
+        )
+        st.session_state["filter_running_only"] = filter_running
 
     # Main content area
     col1, col2 = st.columns([1, 1])
@@ -72,7 +88,7 @@ def main():
                         cert_path=cert_path,
                         key_path=key_path,
                         verify_ssl=verify_ssl,
-                        timeout=timeout
+                        timeout=timeout,
                     )
 
                     client = NiFiClient(config)
@@ -84,7 +100,9 @@ def main():
                         st.session_state["nifi_client"] = client
                         st.session_state["nifi_config"] = config
                     else:
-                        st.error(f"❌ Connection failed: {result.get('error', 'Unknown error')}")
+                        st.error(
+                            f"❌ Connection failed: {result.get('error', 'Unknown error')}"
+                        )
 
                 except Exception as e:
                     st.error(f"❌ Error: {str(e)}")
@@ -97,7 +115,12 @@ def main():
                 with st.spinner("Fetching flow..."):
                     try:
                         client = st.session_state["nifi_client"]
-                        process_group_id = st.session_state.get("process_group_id", "root")
+                        process_group_id = st.session_state.get(
+                            "process_group_id", "root"
+                        )
+                        filter_running_only = st.session_state.get(
+                            "filter_running_only", False
+                        )
 
                         # Fetch flow from NiFi
                         flow_json = client.fetch_flow(process_group_id)
@@ -106,7 +129,8 @@ def main():
                         template_dto = convert_nifi_json_to_template_dto(
                             flow_json,
                             use_friendly_ids=False,
-                            ignore_pass_through=True
+                            ignore_pass_through=True,
+                            filter_running_only=filter_running_only,
                         )
 
                         # Store in session state
@@ -117,12 +141,14 @@ def main():
 
                         # Display summary
                         snippet = template_dto.get("snippet", {})
-                        st.info(f"""
+                        st.info(
+                            f"""
                         **Flow Summary:**
                         - Processors: {len(snippet.get('processors', []))}
                         - Connections: {len(snippet.get('connections', []))}
                         - Process Groups: {len(snippet.get('processGroups', []))}
-                        """)
+                        """
+                        )
 
                     except Exception as e:
                         st.error(f"❌ Error fetching flow: {str(e)}")
@@ -133,14 +159,16 @@ def main():
         st.header("📊 Analysis")
 
         # Create tabs for different analyzers
-        tabs = st.tabs([
-            "Overview",
-            "Classification",
-            "Tables",
-            "SQL Queries",
-            "Lineage",
-            "Variables"
-        ])
+        tabs = st.tabs(
+            [
+                "Overview",
+                "Classification",
+                "Tables",
+                "SQL Queries",
+                "Lineage",
+                "Variables",
+            ]
+        )
 
         template_dto = st.session_state["template_dto"]
         snippet = template_dto.get("snippet", {})
@@ -166,12 +194,14 @@ def main():
             if processors:
                 processor_data = []
                 for proc in processors:
-                    processor_data.append({
-                        "Name": proc.get("name", ""),
-                        "Type": proc.get("type", "").split(".")[-1],
-                        "State": proc.get("state", ""),
-                        "ID": proc.get("id", "")
-                    })
+                    processor_data.append(
+                        {
+                            "Name": proc.get("name", ""),
+                            "Type": proc.get("type", "").split(".")[-1],
+                            "State": proc.get("state", ""),
+                            "ID": proc.get("id", ""),
+                        }
+                    )
 
                 st.dataframe(processor_data, use_container_width=True)
             else:

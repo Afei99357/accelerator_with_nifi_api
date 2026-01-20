@@ -120,14 +120,12 @@ Both projects have:
 
 Both projects now have identical pre-commit setups:
 
-✅ **Claude Attribution Check** (before any other checks)
+✅ **AI Attribution Check** (before any other checks)
 ```bash
-# Blocks commits with Claude references:
-- "Generated with.*Claude"
-- "Co-Authored-By.*Claude"
-- "claude.*anthropic.com"
-- "🤖.*Claude"
-- etc.
+# Blocks commits containing AI assistant attribution patterns
+# Checks for common LLM co-authorship markers
+# Prevents accidental inclusion of AI-generated comments
+# See: .git/hooks/pre-commit-claude-check for details
 ```
 
 ✅ **Code Quality Checks**

@@ -5,8 +5,8 @@ format expected by the analysis pipeline, preserving component IDs from the live
 """
 
 import logging
-from typing import Any, Dict, List, Optional
 from datetime import datetime
+from typing import Any, Dict
 
 from nifi_client.models import IdMapper, _build_pass_through_connections
 
@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 def convert_nifi_json_to_template_dto(
     nifi_json: Dict[str, Any],
     use_friendly_ids: bool = False,
-    ignore_pass_through: bool = False
+    ignore_pass_through: bool = False,
+    filter_running_only: bool = False,
 ) -> Dict[str, Any]:
     """Convert NiFi REST API JSON response to TemplateDTO format.
 
@@ -24,6 +25,8 @@ def convert_nifi_json_to_template_dto(
         nifi_json: JSON response from NiFi /process-groups/{id}/download endpoint
         use_friendly_ids: Whether to generate friendly IDs (default: False to preserve actual IDs)
         ignore_pass_through: Whether to ignore and bypass funnels, input/output ports
+        filter_running_only: Whether to include only RUNNING processors
+                             (default: False to include all)
 
     Returns:
         Dict in TemplateDTO format compatible with existing analysis pipeline
@@ -74,7 +77,8 @@ def convert_nifi_json_to_template_dto(
         flow_contents,
         parent_group_id=pg_id,
         id_mapper=id_mapper,
-        ignore_pass_through=ignore_pass_through
+        ignore_pass_through=ignore_pass_through,
+        filter_running_only=filter_running_only,
     )
 
     result = {
@@ -90,7 +94,8 @@ def _convert_flow_to_snippet(
     flow: Dict[str, Any],
     parent_group_id: str,
     id_mapper: IdMapper,
-    ignore_pass_through: bool = False
+    ignore_pass_through: bool = False,
+    filter_running_only: bool = False,
 ) -> Dict[str, Any]:
     """Convert NiFi flow contents to TemplateDTO snippet format.
 
@@ -99,30 +104,41 @@ def _convert_flow_to_snippet(
         parent_group_id: Parent process group ID
         id_mapper: ID mapper for friendly ID generation
         ignore_pass_through: Whether to ignore and bypass pass-through components
+        filter_running_only: Whether to include only RUNNING processors
 
     Returns:
         Snippet dict in TemplateDTO format
     """
     snippet: Dict[str, Any] = {}
 
-    # Convert processors - filter to only RUNNING
+    # Convert processors
     processors = []
     for proc in flow.get("processors", []):
         proc_dto = _convert_processor(proc, parent_group_id, id_mapper)
-        if proc_dto.get("state") == "RUNNING":
+        # Only filter if requested
+        if filter_running_only:
+            if proc_dto.get("state") == "RUNNING":
+                processors.append(proc_dto)
+        else:
             processors.append(proc_dto)
     snippet["processors"] = processors
 
     # Convert process groups (nested)
     process_groups = []
     for pg in flow.get("processGroups", []):
-        process_groups.append(_convert_process_group(pg, parent_group_id, id_mapper, ignore_pass_through))
+        process_groups.append(
+            _convert_process_group(
+                pg, parent_group_id, id_mapper, ignore_pass_through, filter_running_only
+            )
+        )
     snippet["processGroups"] = process_groups
 
     # Convert controller services
     controller_services = []
     for cs in flow.get("controllerServices", []):
-        controller_services.append(_convert_controller_service(cs, parent_group_id, id_mapper))
+        controller_services.append(
+            _convert_controller_service(cs, parent_group_id, id_mapper)
+        )
     snippet["controllerServices"] = controller_services
 
     # Convert ports and funnels (parse first to track IDs)
@@ -163,10 +179,7 @@ def _convert_flow_to_snippet(
         pass_through_ids.update(f["id"] for f in funnels)
 
         connections = _build_pass_through_connections(
-            all_connections_raw,
-            pass_through_ids,
-            parent_group_id,
-            id_mapper
+            all_connections_raw, pass_through_ids, parent_group_id, id_mapper
         )
     else:
         connections = all_connections_raw
@@ -176,16 +189,16 @@ def _convert_flow_to_snippet(
     # Convert remote process groups
     remote_pgs = []
     for rpg in flow.get("remoteProcessGroups", []):
-        remote_pgs.append(_convert_remote_process_group(rpg, parent_group_id, id_mapper))
+        remote_pgs.append(
+            _convert_remote_process_group(rpg, parent_group_id, id_mapper)
+        )
     snippet["remoteProcessGroups"] = remote_pgs
 
     return snippet
 
 
 def _convert_processor(
-    proc_json: Dict[str, Any],
-    parent_group_id: str,
-    id_mapper: IdMapper
+    proc_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi processor JSON to TemplateDTO processor format.
 
@@ -218,7 +231,9 @@ def _convert_processor(
     proc_id = id_mapper.get_friendly_id(proc_id_raw, "processor")
 
     parent_group_id_raw = component.get("parentGroupId", parent_group_id)
-    mapped_parent_group_id = id_mapper.get_friendly_id(parent_group_id_raw, "processGroup")
+    mapped_parent_group_id = id_mapper.get_friendly_id(
+        parent_group_id_raw, "processGroup"
+    )
 
     # Parse config
     config_json = component.get("config", {})
@@ -241,9 +256,7 @@ def _convert_processor(
 
 
 def _convert_connection(
-    conn_json: Dict[str, Any],
-    parent_group_id: str,
-    id_mapper: IdMapper
+    conn_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi connection JSON to TemplateDTO connection format.
 
@@ -274,7 +287,9 @@ def _convert_connection(
     conn_id = id_mapper.get_friendly_id(conn_id_raw, "connection")
 
     parent_group_id_raw = component.get("parentGroupId", parent_group_id)
-    mapped_parent_group_id = id_mapper.get_friendly_id(parent_group_id_raw, "processGroup")
+    mapped_parent_group_id = id_mapper.get_friendly_id(
+        parent_group_id_raw, "processGroup"
+    )
 
     # Parse source
     source_json = component.get("source", {})
@@ -293,7 +308,11 @@ def _convert_connection(
     source_id = id_mapper.lookup_or_map_by_type(source_id_raw, source_component_type)
 
     source_group_id_raw = source_json.get("groupId")
-    source_group_id = id_mapper.get_friendly_id(source_group_id_raw, "processGroup") if source_group_id_raw else None
+    source_group_id = (
+        id_mapper.get_friendly_id(source_group_id_raw, "processGroup")
+        if source_group_id_raw
+        else None
+    )
 
     source = {
         "id": source_id,
@@ -310,7 +329,11 @@ def _convert_connection(
     dest_id = id_mapper.lookup_or_map_by_type(dest_id_raw, dest_component_type)
 
     dest_group_id_raw = dest_json.get("groupId")
-    dest_group_id = id_mapper.get_friendly_id(dest_group_id_raw, "processGroup") if dest_group_id_raw else None
+    dest_group_id = (
+        id_mapper.get_friendly_id(dest_group_id_raw, "processGroup")
+        if dest_group_id_raw
+        else None
+    )
 
     destination = {
         "id": dest_id,
@@ -332,7 +355,8 @@ def _convert_process_group(
     pg_json: Dict[str, Any],
     parent_group_id: str,
     id_mapper: IdMapper,
-    ignore_pass_through: bool = False
+    ignore_pass_through: bool = False,
+    filter_running_only: bool = False,
 ) -> Dict[str, Any]:
     """Convert NiFi process group JSON to TemplateDTO process group format.
 
@@ -358,7 +382,9 @@ def _convert_process_group(
     pg_id = id_mapper.get_friendly_id(pg_id_raw, "processGroup")
 
     parent_group_id_raw = component.get("parentGroupId", parent_group_id)
-    mapped_parent_group_id = id_mapper.get_friendly_id(parent_group_id_raw, "processGroup")
+    mapped_parent_group_id = id_mapper.get_friendly_id(
+        parent_group_id_raw, "processGroup"
+    )
 
     # Parse variables
     variables = {}
@@ -378,7 +404,8 @@ def _convert_process_group(
             contents_json,
             parent_group_id=pg_id,
             id_mapper=id_mapper,
-            ignore_pass_through=ignore_pass_through
+            ignore_pass_through=ignore_pass_through,
+            filter_running_only=filter_running_only,
         )
 
     return {
@@ -393,9 +420,7 @@ def _convert_process_group(
 
 
 def _convert_controller_service(
-    cs_json: Dict[str, Any],
-    parent_group_id: str,
-    id_mapper: IdMapper
+    cs_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi controller service JSON to TemplateDTO format."""
     component = cs_json.get("component", cs_json)
@@ -403,7 +428,9 @@ def _convert_controller_service(
     cs_id = component.get("id", "")  # Controller services keep original IDs
 
     parent_group_id_raw = component.get("parentGroupId", parent_group_id)
-    mapped_parent_group_id = id_mapper.get_friendly_id(parent_group_id_raw, "processGroup")
+    mapped_parent_group_id = id_mapper.get_friendly_id(
+        parent_group_id_raw, "processGroup"
+    )
 
     return {
         "componentType": "controllerService",
@@ -420,9 +447,7 @@ def _convert_controller_service(
 
 
 def _convert_input_port(
-    ip_json: Dict[str, Any],
-    parent_group_id: str,
-    id_mapper: IdMapper
+    ip_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi input port JSON to TemplateDTO format."""
     component = ip_json.get("component", ip_json)
@@ -431,7 +456,9 @@ def _convert_input_port(
     ip_id = id_mapper.get_friendly_id(ip_id_raw, "inputPort")
 
     parent_group_id_raw = component.get("parentGroupId", parent_group_id)
-    mapped_parent_group_id = id_mapper.get_friendly_id(parent_group_id_raw, "processGroup")
+    mapped_parent_group_id = id_mapper.get_friendly_id(
+        parent_group_id_raw, "processGroup"
+    )
 
     return {
         "componentType": "inputPort",
@@ -445,9 +472,7 @@ def _convert_input_port(
 
 
 def _convert_output_port(
-    op_json: Dict[str, Any],
-    parent_group_id: str,
-    id_mapper: IdMapper
+    op_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi output port JSON to TemplateDTO format."""
     component = op_json.get("component", op_json)
@@ -456,7 +481,9 @@ def _convert_output_port(
     op_id = id_mapper.get_friendly_id(op_id_raw, "outputPort")
 
     parent_group_id_raw = component.get("parentGroupId", parent_group_id)
-    mapped_parent_group_id = id_mapper.get_friendly_id(parent_group_id_raw, "processGroup")
+    mapped_parent_group_id = id_mapper.get_friendly_id(
+        parent_group_id_raw, "processGroup"
+    )
 
     return {
         "componentType": "outputPort",
@@ -470,9 +497,7 @@ def _convert_output_port(
 
 
 def _convert_funnel(
-    funnel_json: Dict[str, Any],
-    parent_group_id: str,
-    id_mapper: IdMapper
+    funnel_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi funnel JSON to TemplateDTO format."""
     component = funnel_json.get("component", funnel_json)
@@ -481,7 +506,9 @@ def _convert_funnel(
     funnel_id = id_mapper.get_friendly_id(funnel_id_raw, "funnel")
 
     parent_group_id_raw = component.get("parentGroupId", parent_group_id)
-    mapped_parent_group_id = id_mapper.get_friendly_id(parent_group_id_raw, "processGroup")
+    mapped_parent_group_id = id_mapper.get_friendly_id(
+        parent_group_id_raw, "processGroup"
+    )
 
     return {
         "componentType": "funnel",
@@ -491,9 +518,7 @@ def _convert_funnel(
 
 
 def _convert_remote_process_group(
-    rpg_json: Dict[str, Any],
-    parent_group_id: str,
-    id_mapper: IdMapper
+    rpg_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi remote process group JSON to TemplateDTO format."""
     component = rpg_json.get("component", rpg_json)
@@ -501,7 +526,9 @@ def _convert_remote_process_group(
     rpg_id = component.get("id", "")  # Remote PGs keep original IDs
 
     parent_group_id_raw = component.get("parentGroupId", parent_group_id)
-    mapped_parent_group_id = id_mapper.get_friendly_id(parent_group_id_raw, "processGroup")
+    mapped_parent_group_id = id_mapper.get_friendly_id(
+        parent_group_id_raw, "processGroup"
+    )
 
     return {
         "componentType": "remoteProcessGroup",
