@@ -2,6 +2,28 @@
 
 ## Setup
 
+### Method 1: Using uv (Recommended - Fast!)
+
+1. Navigate to the project directory:
+```bash
+cd /home/eric/Projects/nifi_api_analyzer
+```
+
+2. Install dependencies with uv:
+```bash
+uv sync
+```
+
+That's it! uv automatically creates the virtual environment and installs all dependencies.
+
+3. Run commands with uv:
+```bash
+uv run streamlit run streamlit_app/app.py
+uv run python example_usage.py
+```
+
+### Method 2: Using pip (Traditional)
+
 1. Navigate to the project directory:
 ```bash
 cd /home/eric/Projects/nifi_api_analyzer

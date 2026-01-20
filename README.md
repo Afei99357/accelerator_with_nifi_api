@@ -36,19 +36,29 @@ nifi_api_analyzer/
 
 ## Installation
 
-1. Clone the repository:
+### Using uv (Recommended)
+
+[uv](https://github.com/astral-sh/uv) is a fast Python package manager that's 10-100x faster than pip.
+
 ```bash
-cd /home/eric/Projects/nifi_api_analyzer
+# Install uv if you haven't already
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies (creates venv automatically)
+uv sync
+
+# Run the app
+uv run streamlit run streamlit_app/app.py
 ```
 
-2. Create a virtual environment:
+### Using pip (Traditional)
+
 ```bash
+# Create a virtual environment
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
 
-3. Install dependencies:
-```bash
+# Install dependencies
 pip install -r requirements.txt
 ```
 
