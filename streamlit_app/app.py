@@ -70,6 +70,15 @@ def main():
         )
         st.session_state["filter_running_only"] = filter_running
 
+        st.divider()
+        st.subheader("Debug Options")
+        debug_mode = st.checkbox(
+            "Enable Debug Mode",
+            value=False,
+            help="Show detailed API response and conversion info",
+        )
+        st.session_state["debug_mode"] = debug_mode
+
     # Main content area
     col1, col2 = st.columns([1, 1])
 
@@ -114,6 +123,8 @@ def main():
             else:
                 with st.spinner("Fetching flow..."):
                     try:
+                        import requests
+
                         client = st.session_state["nifi_client"]
                         process_group_id = st.session_state.get(
                             "process_group_id", "root"
@@ -121,9 +132,45 @@ def main():
                         filter_running_only = st.session_state.get(
                             "filter_running_only", False
                         )
+                        debug_mode = st.session_state.get("debug_mode", False)
 
                         # Fetch flow from NiFi
                         flow_json = client.fetch_flow(process_group_id)
+
+                        # Debug mode: Show raw response structure
+                        if debug_mode:
+                            with st.expander(
+                                "🔍 Debug: Raw API Response", expanded=False
+                            ):
+                                st.json(flow_json)
+
+                                # Show structure analysis
+                                st.subheader("Response Structure")
+                                pg_flow = flow_json.get("processGroupFlow", {})
+                                flow_contents = pg_flow.get("flow", {})
+
+                                st.write(f"- Has 'processGroupFlow': {bool(pg_flow)}")
+                                st.write(f"- Has 'flow': {bool(flow_contents)}")
+
+                                proc_count = len(flow_contents.get("processors", []))
+                                pg_count = len(flow_contents.get("processGroups", []))
+                                conn_count = len(flow_contents.get("connections", []))
+
+                                st.write(f"- Processors in flow: {proc_count}")
+                                st.write(f"- Process groups in flow: {pg_count}")
+                                st.write(f"- Connections in flow: {conn_count}")
+
+                                # Show processor states if any
+                                processors = flow_contents.get("processors", [])
+                                if processors:
+                                    states = {}
+                                    for p in processors:
+                                        proc_data = p.get("component", p)
+                                        state = proc_data.get("state", "UNKNOWN")
+                                        states[state] = states.get(state, 0) + 1
+                                    st.write("Processor states:", states)
+                                else:
+                                    st.warning("⚠️ No processors found in API response!")
 
                         # Convert to template_dto
                         template_dto = convert_nifi_json_to_template_dto(
@@ -133,25 +180,93 @@ def main():
                             filter_running_only=filter_running_only,
                         )
 
+                        # Debug mode: Show conversion result
+                        if debug_mode:
+                            with st.expander(
+                                "🔍 Debug: Converted template_dto", expanded=False
+                            ):
+                                snippet = template_dto.get("snippet", {})
+                                proc_after = len(snippet.get("processors", []))
+                                conn_after = len(snippet.get("connections", []))
+                                pg_after = len(snippet.get("processGroups", []))
+
+                                st.write(f"- Processors after conversion: {proc_after}")
+                                st.write(
+                                    f"- Connections after conversion: {conn_after}"
+                                )
+                                st.write(
+                                    f"- Process groups after conversion: {pg_after}"
+                                )
+
+                                if filter_running_only:
+                                    msg = (
+                                        "Note: filter_running_only enabled - "
+                                        "only RUNNING processors included"
+                                    )
+                                    st.info(msg)
+
                         # Store in session state
                         st.session_state["template_dto"] = template_dto
                         st.session_state["flow_json"] = flow_json
 
-                        st.success("✅ Flow fetched successfully")
-
                         # Display summary
                         snippet = template_dto.get("snippet", {})
-                        st.info(
-                            f"""
-                        **Flow Summary:**
-                        - Processors: {len(snippet.get('processors', []))}
-                        - Connections: {len(snippet.get('connections', []))}
-                        - Process Groups: {len(snippet.get('processGroups', []))}
-                        """
-                        )
+                        processor_count = len(snippet.get("processors", []))
 
+                        if processor_count == 0:
+                            st.warning("⚠️ No processors found in the fetched flow")
+                            st.info(
+                                f"""
+**Possible reasons:**
+1. The selected Process Group is empty
+2. Processors are in nested Process Groups (not shown at this level)
+3. All processors are filtered out (check 'Filter RUNNING processors only')
+4. Authentication has view access but not full flow access
+
+**Try:**
+- Enable 'Debug Mode' to see the raw API response
+- Check if Process Group ID is correct (currently: '{process_group_id}')
+- Uncheck 'Filter RUNNING processors only' if enabled
+- Check nested process groups for processors
+                            """
+                            )
+                        else:
+                            st.success("✅ Flow fetched successfully")
+                            st.info(
+                                f"""
+**Flow Summary:**
+- Processors: {processor_count}
+- Connections: {len(snippet.get('connections', []))}
+- Process Groups: {len(snippet.get('processGroups', []))}
+                            """
+                            )
+
+                    except requests.exceptions.HTTPError as e:
+                        st.error(
+                            f"❌ HTTP Error fetching flow: {e.response.status_code}"
+                        )
+                        st.error(f"Response: {e.response.text[:500]}")
+                    except requests.exceptions.RequestException as e:
+                        st.error(f"❌ Network error fetching flow: {str(e)}")
+                    except ValueError as e:
+                        st.error(f"❌ Invalid request: {str(e)}")
+                    except PermissionError as e:
+                        st.error(f"❌ Access denied: {str(e)}")
+                    except TimeoutError as e:
+                        st.error(f"❌ Timeout: {str(e)}")
+                    except KeyError as e:
+                        st.error(
+                            f"❌ Unexpected API response structure - missing key: {e}"
+                        )
+                        if st.session_state.get("debug_mode", False):
+                            st.json(flow_json)
                     except Exception as e:
                         st.error(f"❌ Error fetching flow: {str(e)}")
+                        st.error(f"Error type: {type(e).__name__}")
+                        import traceback
+
+                        if st.session_state.get("debug_mode", False):
+                            st.code(traceback.format_exc())
 
     # Analysis Section
     if "template_dto" in st.session_state:

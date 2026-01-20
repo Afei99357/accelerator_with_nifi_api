@@ -59,6 +59,18 @@ def convert_nifi_json_to_template_dto(
     pg_flow = nifi_json.get("processGroupFlow", {})
     flow_contents = pg_flow.get("flow", {})
 
+    # Validate response structure
+    if not pg_flow:
+        logger.warning("API response missing 'processGroupFlow' key")
+    if not flow_contents:
+        logger.warning("API response missing 'flow' key inside processGroupFlow")
+
+    # Log processor count from raw API
+    raw_processor_count = len(flow_contents.get("processors", []))
+    logger.info(
+        f"Raw API response contains {raw_processor_count} processors at root level"
+    )
+
     # Get process group metadata
     pg_id_raw = pg_flow.get("id", "root")
     pg_id = id_mapper.get_friendly_id(pg_id_raw, "processGroup")
