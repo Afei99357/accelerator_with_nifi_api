@@ -244,7 +244,26 @@ def main():
 
                         # Display summary
                         snippet = template_dto.get("snippet", {})
-                        processor_count = len(snippet.get("processors", []))
+
+                        # Helper function to count all processors recursively
+                        def count_all_processors(snippet_data):
+                            """Recursively count all processors including nested groups."""
+                            count = len(snippet_data.get("processors", []))
+                            for pg in snippet_data.get("processGroups", []):
+                                count += count_all_processors(pg.get("contents", {}))
+                            return count
+
+                        # Helper function to count all connections recursively
+                        def count_all_connections(snippet_data):
+                            """Recursively count all connections including nested groups."""
+                            count = len(snippet_data.get("connections", []))
+                            for pg in snippet_data.get("processGroups", []):
+                                count += count_all_connections(pg.get("contents", {}))
+                            return count
+
+                        processor_count = count_all_processors(snippet)
+                        connection_count = count_all_connections(snippet)
+                        root_processor_count = len(snippet.get("processors", []))
 
                         if processor_count == 0:
                             st.warning("⚠️ No processors found in the fetched flow")
@@ -265,12 +284,13 @@ def main():
                             )
                         else:
                             st.success("✅ Flow fetched successfully")
+                            nested_count = processor_count - root_processor_count
                             st.info(
                                 f"""
 **Flow Summary:**
-- Processors: {processor_count}
-- Connections: {len(snippet.get('connections', []))}
-- Process Groups: {len(snippet.get('processGroups', []))}
+- **Total Processors**: {processor_count} (root: {root_processor_count}, nested: {nested_count})
+- **Total Connections**: {connection_count}
+- **Process Groups**: {len(snippet.get('processGroups', []))}
                             """
                             )
 
@@ -325,15 +345,23 @@ def main():
         with tabs[0]:
             st.subheader("Flow Overview")
 
-            # Helper function to count all processors recursively
+            # Helper functions for recursive counting
             def count_all_processors(snippet_data):
-                """Recursively count all processors including nested process groups."""
+                """Recursively count all processors including nested groups."""
                 count = len(snippet_data.get("processors", []))
                 for pg in snippet_data.get("processGroups", []):
                     count += count_all_processors(pg.get("contents", {}))
                 return count
 
+            def count_all_connections(snippet_data):
+                """Recursively count all connections including nested groups."""
+                count = len(snippet_data.get("connections", []))
+                for pg in snippet_data.get("processGroups", []):
+                    count += count_all_connections(pg.get("contents", {}))
+                return count
+
             total_processors = count_all_processors(snippet)
+            total_connections = count_all_connections(snippet)
 
             col1, col2, col3 = st.columns(3)
 
@@ -342,7 +370,8 @@ def main():
                 st.caption(f"Root level: {len(snippet.get('processors', []))}")
 
             with col2:
-                st.metric("Connections", len(snippet.get("connections", [])))
+                st.metric("Connections (total)", total_connections)
+                st.caption(f"Root level: {len(snippet.get('connections', []))}")
 
             with col3:
                 st.metric("Process Groups", len(snippet.get("processGroups", [])))
