@@ -5,6 +5,7 @@ Extracts SQL queries from processor configurations.
 
 import re
 from typing import Any, Dict, List
+
 from analyzers.base import BaseAnalyzer
 
 
@@ -81,7 +82,9 @@ class SQLExtractionAnalyzer(BaseAnalyzer):
             "total_count": len(queries),
         }
 
-    def _extract_sql_from_processor(self, processor: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_sql_from_processor(
+        self, processor: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         """Extract SQL queries from a single processor.
 
         Args:
@@ -228,10 +231,35 @@ class SQLExtractionAnalyzer(BaseAnalyzer):
             True if it's a SQL keyword
         """
         keywords = {
-            "SELECT", "WHERE", "AND", "OR", "AS", "ON", "IN", "EXISTS",
-            "NOT", "NULL", "IS", "LIKE", "BETWEEN", "CASE", "WHEN", "THEN",
-            "ELSE", "END", "GROUP", "ORDER", "BY", "HAVING", "LIMIT",
-            "INNER", "OUTER", "LEFT", "RIGHT", "FULL", "CROSS"
+            "SELECT",
+            "WHERE",
+            "AND",
+            "OR",
+            "AS",
+            "ON",
+            "IN",
+            "EXISTS",
+            "NOT",
+            "NULL",
+            "IS",
+            "LIKE",
+            "BETWEEN",
+            "CASE",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+            "GROUP",
+            "ORDER",
+            "BY",
+            "HAVING",
+            "LIMIT",
+            "INNER",
+            "OUTER",
+            "LEFT",
+            "RIGHT",
+            "FULL",
+            "CROSS",
         }
         return word.upper() in keywords
 

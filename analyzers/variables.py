@@ -5,6 +5,7 @@ Analyzes NiFi expression language variables and their usage across processors.
 
 import re
 from typing import Any, Dict, List, Set
+
 from analyzers.base import BaseAnalyzer
 
 
@@ -69,7 +70,9 @@ class VariablesAnalyzer(BaseAnalyzer):
             "undefined_count": len(undefined),
         }
 
-    def _get_defined_variables(self, snippet: Dict[str, Any] = None, collected: Dict[str, Any] = None) -> Dict[str, Any]:
+    def _get_defined_variables(
+        self, snippet: Dict[str, Any] = None, collected: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         """Recursively collect variable definitions from process groups.
 
         Args:
@@ -221,5 +224,9 @@ class VariablesAnalyzer(BaseAnalyzer):
         return {
             "is_valid": is_valid,
             "undefined_variables": undefined,
-            "message": "All variables are defined" if is_valid else f"Found {len(undefined)} undefined variables",
+            "message": (
+                "All variables are defined"
+                if is_valid
+                else f"Found {len(undefined)} undefined variables"
+            ),
         }

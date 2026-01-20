@@ -5,18 +5,22 @@ or Model Serving endpoints from your local machine.
 """
 
 import os
-import requests
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+import requests
 
 
 @dataclass
 class DatabricksLLMConfig:
     """Configuration for Databricks LLM API."""
+
     workspace_url: str  # e.g., "https://your-workspace.cloud.databricks.com"
     token: str  # Personal Access Token
     endpoint_name: Optional[str] = None  # For custom model serving endpoints
-    model_name: Optional[str] = None  # For foundation models (e.g., "databricks-meta-llama-3-70b-instruct")
+    model_name: Optional[str] = (
+        None  # For foundation models (e.g., "databricks-meta-llama-3-70b-instruct")
+    )
     timeout: int = 120
 
 
@@ -31,10 +35,12 @@ class DatabricksLLMClient:
         """
         self.config = config
         self.session = requests.Session()
-        self.session.headers.update({
-            "Authorization": f"Bearer {config.token}",
-            "Content-Type": "application/json"
-        })
+        self.session.headers.update(
+            {
+                "Authorization": f"Bearer {config.token}",
+                "Content-Type": "application/json",
+            }
+        )
 
     def call_foundation_model(
         self,
@@ -42,7 +48,7 @@ class DatabricksLLMClient:
         model_name: Optional[str] = None,
         temperature: float = 0.1,
         max_tokens: int = 1000,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """Call a Databricks Foundation Model API.
 
@@ -70,31 +76,23 @@ class DatabricksLLMClient:
         url = f"{self.config.workspace_url}/serving-endpoints/{model}/invocations"
 
         payload = {
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
+            "messages": [{"role": "user", "content": prompt}],
             "temperature": temperature,
             "max_tokens": max_tokens,
-            **kwargs
+            **kwargs,
         }
 
         try:
-            response = self.session.post(
-                url,
-                json=payload,
-                timeout=self.config.timeout
-            )
+            response = self.session.post(url, json=payload, timeout=self.config.timeout)
             response.raise_for_status()
             return response.json()
 
         except requests.exceptions.HTTPError as e:
-            error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
+            error_detail = e.response.text if hasattr(e.response, "text") else str(e)
             raise Exception(f"API call failed: {error_detail}")
 
     def call_custom_endpoint(
-        self,
-        data: Dict[str, Any],
-        endpoint_name: Optional[str] = None
+        self, data: Dict[str, Any], endpoint_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """Call a custom Model Serving endpoint.
 
@@ -112,16 +110,12 @@ class DatabricksLLMClient:
         url = f"{self.config.workspace_url}/serving-endpoints/{endpoint}/invocations"
 
         try:
-            response = self.session.post(
-                url,
-                json=data,
-                timeout=self.config.timeout
-            )
+            response = self.session.post(url, json=data, timeout=self.config.timeout)
             response.raise_for_status()
             return response.json()
 
         except requests.exceptions.HTTPError as e:
-            error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
+            error_detail = e.response.text if hasattr(e.response, "text") else str(e)
             raise Exception(f"API call failed: {error_detail}")
 
     def chat_completion(
@@ -130,7 +124,7 @@ class DatabricksLLMClient:
         model_name: Optional[str] = None,
         temperature: float = 0.1,
         max_tokens: int = 1000,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """Call with chat messages format (for multi-turn conversations).
 
@@ -162,20 +156,16 @@ class DatabricksLLMClient:
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
-            **kwargs
+            **kwargs,
         }
 
         try:
-            response = self.session.post(
-                url,
-                json=payload,
-                timeout=self.config.timeout
-            )
+            response = self.session.post(url, json=payload, timeout=self.config.timeout)
             response.raise_for_status()
             return response.json()
 
         except requests.exceptions.HTTPError as e:
-            error_detail = e.response.text if hasattr(e.response, 'text') else str(e)
+            error_detail = e.response.text if hasattr(e.response, "text") else str(e)
             raise Exception(f"API call failed: {error_detail}")
 
     def extract_text_response(self, response: Dict[str, Any]) -> str:
@@ -229,7 +219,7 @@ def create_databricks_client_from_env() -> DatabricksLLMClient:
         workspace_url=workspace_url,
         token=token,
         model_name=os.getenv("DATABRICKS_MODEL_NAME"),
-        endpoint_name=os.getenv("DATABRICKS_ENDPOINT_NAME")
+        endpoint_name=os.getenv("DATABRICKS_ENDPOINT_NAME"),
     )
 
     return DatabricksLLMClient(config)
@@ -249,7 +239,7 @@ if __name__ == "__main__":
         response = client.call_foundation_model(
             prompt="Explain what Apache NiFi is in one sentence.",
             temperature=0.1,
-            max_tokens=100
+            max_tokens=100,
         )
 
         text = client.extract_text_response(response)
@@ -262,7 +252,7 @@ if __name__ == "__main__":
     config = DatabricksLLMConfig(
         workspace_url="https://your-workspace.cloud.databricks.com",
         token="dapi...",
-        model_name="databricks-meta-llama-3-1-70b-instruct"
+        model_name="databricks-meta-llama-3-1-70b-instruct",
     )
 
     client = DatabricksLLMClient(config)
@@ -270,7 +260,7 @@ if __name__ == "__main__":
     # Multi-turn conversation
     messages = [
         {"role": "system", "content": "You are a helpful assistant for NiFi analysis."},
-        {"role": "user", "content": "What is a processor in NiFi?"}
+        {"role": "user", "content": "What is a processor in NiFi?"},
     ]
 
     response = client.chat_completion(messages)

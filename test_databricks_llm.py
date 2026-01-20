@@ -1,8 +1,14 @@
 """Quick test script for Databricks LLM connectivity."""
 
 import os
+
 from dotenv import load_dotenv
-from databricks_llm_client import create_databricks_client_from_env, DatabricksLLMClient, DatabricksLLMConfig
+
+from databricks_llm_client import (
+    DatabricksLLMClient,
+    DatabricksLLMConfig,
+    create_databricks_client_from_env,
+)
 
 # Load environment variables
 load_dotenv()
@@ -26,7 +32,7 @@ def test_with_env_vars():
         print("  export DATABRICKS_MODEL_NAME='databricks-meta-llama-3-1-70b-instruct'")
         return False
 
-    print(f"\n✅ Environment variables found")
+    print("\n✅ Environment variables found")
     print(f"   Host: {os.getenv('DATABRICKS_HOST')}")
     print(f"   Model: {os.getenv('DATABRICKS_MODEL_NAME')}")
     print(f"   Token: {'*' * 20}...")
@@ -40,13 +46,13 @@ def test_with_env_vars():
         response = client.call_foundation_model(
             prompt="Say 'Hello from Databricks!' and nothing else.",
             temperature=0.1,
-            max_tokens=20
+            max_tokens=20,
         )
         print("✅ API call successful")
 
         print("\n[3/3] Extracting response...")
         text = client.extract_text_response(response)
-        print(f"✅ Response received\n")
+        print("✅ Response received\n")
         print("-" * 70)
         print(f"Model response: {text}")
         print("-" * 70)
@@ -84,18 +90,14 @@ def test_direct_config():
     try:
         print("\nConnecting...")
         config = DatabricksLLMConfig(
-            workspace_url=workspace_url,
-            token=token,
-            model_name=model
+            workspace_url=workspace_url, token=token, model_name=model
         )
 
         client = DatabricksLLMClient(config)
 
         print("Calling model...")
         response = client.call_foundation_model(
-            prompt="Say 'Hello!' and nothing else.",
-            temperature=0.1,
-            max_tokens=10
+            prompt="Say 'Hello!' and nothing else.", temperature=0.1, max_tokens=10
         )
 
         text = client.extract_text_response(response)
@@ -118,7 +120,7 @@ def test_conversation():
 
         messages = [
             {"role": "system", "content": "You are a helpful assistant. Be concise."},
-            {"role": "user", "content": "What is Apache NiFi in one sentence?"}
+            {"role": "user", "content": "What is Apache NiFi in one sentence?"},
         ]
 
         print("\nUser: What is Apache NiFi in one sentence?")

@@ -3,7 +3,8 @@
 Analyzes data flow lineage between tables through processors.
 """
 
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set
+
 from analyzers.base import BaseAnalyzer
 from analyzers.table_extraction import TableExtractionAnalyzer
 
@@ -98,9 +99,7 @@ class LineageAnalyzer(BaseAnalyzer):
         }
 
     def _find_downstream_targets(
-        self,
-        source_id: str,
-        target_processors: List[Dict[str, Any]]
+        self, source_id: str, target_processors: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Find all target processors downstream from a source processor.
 
@@ -213,12 +212,14 @@ class LineageAnalyzer(BaseAnalyzer):
             nodes.add(source)
             nodes.add(target)
 
-            edges.append({
-                "source": source,
-                "target": target,
-                "source_processor": lineage["source_processor"]["name"],
-                "target_processor": lineage["target_processor"]["name"],
-            })
+            edges.append(
+                {
+                    "source": source,
+                    "target": target,
+                    "source_processor": lineage["source_processor"]["name"],
+                    "target_processor": lineage["target_processor"]["name"],
+                }
+            )
 
         return {
             "nodes": [{"id": node, "label": node} for node in sorted(nodes)],
@@ -241,8 +242,10 @@ class LineageAnalyzer(BaseAnalyzer):
 
         # Find related lineage records
         related_lineages = [
-            lineage for lineage in results["lineages"]
-            if lineage["source_table"] == table_name or lineage["target_table"] == table_name
+            lineage
+            for lineage in results["lineages"]
+            if lineage["source_table"] == table_name
+            or lineage["target_table"] == table_name
         ]
 
         return {

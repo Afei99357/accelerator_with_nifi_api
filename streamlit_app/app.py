@@ -330,10 +330,8 @@ def main():
         tabs = st.tabs(
             [
                 "Overview",
-                "Classification",
                 "Tables",
                 "SQL Queries",
-                "Lineage",
                 "Variables",
             ]
         )
@@ -412,30 +410,313 @@ def main():
             else:
                 st.info("No processors found")
 
-        # Classification Tab
-        with tabs[1]:
-            st.subheader("Processor Classification")
-            st.info("Classification analyzer not yet implemented. Coming soon!")
-
         # Tables Tab
-        with tabs[2]:
+        with tabs[1]:
             st.subheader("Database Tables")
-            st.info("Table extraction analyzer not yet implemented. Coming soon!")
+
+            from analyzers import TableExtractionAnalyzer
+
+            analyzer = TableExtractionAnalyzer(template_dto)
+            results = analyzer.analyze()
+
+            # Summary metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Tables", results["table_count"])
+            with col2:
+                st.metric("Source Tables", len(results["sources"]))
+            with col3:
+                st.metric("Target Tables", len(results["targets"]))
+
+            # Tabs for different views
+            table_tabs = st.tabs(
+                ["All Tables", "Sources (Read)", "Targets (Write)", "By Processor"]
+            )
+
+            with table_tabs[0]:
+                # All tables list
+                if results["tables"]:
+                    import pandas as pd
+
+                    st.dataframe(
+                        pd.DataFrame({"Table Name": results["tables"]}),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("No tables found")
+
+            with table_tabs[1]:
+                # Source tables
+                if results["sources"]:
+                    import pandas as pd
+
+                    source_data = [
+                        {
+                            "Table": s["name"],
+                            "Processor": s["processor"],
+                            "Type": s["type"],
+                        }
+                        for s in results["sources"]
+                    ]
+                    st.dataframe(source_data, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No source tables found")
+
+            with table_tabs[2]:
+                # Target tables
+                if results["targets"]:
+                    import pandas as pd
+
+                    target_data = [
+                        {
+                            "Table": t["name"],
+                            "Processor": t["processor"],
+                            "Type": t["type"],
+                        }
+                        for t in results["targets"]
+                    ]
+                    st.dataframe(target_data, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No target tables found")
+
+            with table_tabs[3]:
+                # By processor
+                if results["by_processor"]:
+                    import pandas as pd
+
+                    proc_table_data = [
+                        {"Processor ID": proc_id, "Tables": ", ".join(tables)}
+                        for proc_id, tables in results["by_processor"].items()
+                    ]
+                    st.dataframe(
+                        proc_table_data, use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.info("No processor-table mappings found")
+
+            # Export button
+            if results["tables"]:
+                import pandas as pd
+
+                csv = pd.DataFrame({"Table Name": results["tables"]}).to_csv(
+                    index=False
+                )
+                st.download_button(
+                    label="Download tables as CSV",
+                    data=csv,
+                    file_name="nifi_tables.csv",
+                    mime="text/csv",
+                )
 
         # SQL Queries Tab
-        with tabs[3]:
+        with tabs[2]:
             st.subheader("SQL Queries")
-            st.info("SQL extraction analyzer not yet implemented. Coming soon!")
 
-        # Lineage Tab
-        with tabs[4]:
-            st.subheader("Table Lineage")
-            st.info("Lineage analyzer not yet implemented. Coming soon!")
+            from analyzers import SQLExtractionAnalyzer
+
+            analyzer = SQLExtractionAnalyzer(template_dto)
+            results = analyzer.analyze()
+
+            # Summary metrics
+            st.metric("Total Queries", results["total_count"])
+
+            if results["total_count"] > 0:
+                # By type summary
+                st.subheader("Queries by Type")
+                type_counts = {
+                    sql_type: len(queries)
+                    for sql_type, queries in results["by_type"].items()
+                    if queries
+                }
+                col_count = min(len(type_counts), 4)
+                cols = st.columns(col_count)
+                for i, (sql_type, count) in enumerate(type_counts.items()):
+                    with cols[i % col_count]:
+                        st.metric(sql_type, count)
+
+                # Query details
+                st.subheader("Query Details")
+
+                # Filter by type
+                all_types = list(results["by_type"].keys())
+                selected_type = st.selectbox(
+                    "Filter by SQL type",
+                    ["All"] + [t for t in all_types if results["by_type"][t]],
+                )
+
+                # Get queries to display
+                if selected_type == "All":
+                    queries_to_show = results["queries"]
+                else:
+                    queries_to_show = results["by_type"][selected_type]
+
+                # Display queries
+                for i, query in enumerate(queries_to_show):
+                    with st.expander(
+                        f"{query['type']} - Processor: {query['processor_id'][:8]}..."
+                    ):
+                        st.code(query["sql"], language="sql")
+
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.write(f"**Property:** {query['property_name']}")
+                            st.write(f"**Length:** {query['length']} chars")
+                        with col2:
+                            st.write(f"**Parameterized:** {query['is_parameterized']}")
+                            if query["tables"]:
+                                st.write(f"**Tables:** {', '.join(query['tables'])}")
+
+                        if query["variables"]:
+                            st.write(f"**Variables:** {', '.join(query['variables'])}")
+
+                # Export button
+                import pandas as pd
+
+                export_data = [
+                    {
+                        "Processor": q["processor_id"],
+                        "Type": q["type"],
+                        "Property": q["property_name"],
+                        "SQL": q["sql"],
+                        "Tables": ", ".join(q["tables"]),
+                        "Parameterized": q["is_parameterized"],
+                    }
+                    for q in results["queries"]
+                ]
+                csv = pd.DataFrame(export_data).to_csv(index=False)
+                st.download_button(
+                    label="Download queries as CSV",
+                    data=csv,
+                    file_name="nifi_sql_queries.csv",
+                    mime="text/csv",
+                )
+            else:
+                st.info("No SQL queries found in processors")
 
         # Variables Tab
-        with tabs[5]:
+        with tabs[3]:
             st.subheader("Variable Dependencies")
-            st.info("Variables analyzer not yet implemented. Coming soon!")
+
+            from analyzers import VariablesAnalyzer
+
+            analyzer = VariablesAnalyzer(template_dto)
+            results = analyzer.analyze()
+
+            # Summary metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Defined Variables", results["defined_count"])
+            with col2:
+                st.metric("Used Variables", results["used_count"])
+            with col3:
+                color = "normal" if results["undefined_count"] == 0 else "inverse"
+                st.metric(
+                    "Undefined Variables",
+                    results["undefined_count"],
+                    delta_color=color,
+                )
+
+            # Validation status
+            validation = analyzer.validate_variables()
+            if validation["is_valid"]:
+                st.success("✅ All variables are properly defined")
+            else:
+                st.error(f"❌ {validation['message']}")
+
+            # Variable tabs
+            var_tabs = st.tabs(["Defined", "Used", "Undefined", "By Processor"])
+
+            with var_tabs[0]:
+                # Defined variables
+                if results["defined_variables"]:
+                    import pandas as pd
+
+                    defined_data = [
+                        {
+                            "Variable": var_name,
+                            "Value": var_info["value"],
+                            "Process Group": var_info["process_group"],
+                        }
+                        for var_name, var_info in results["defined_variables"].items()
+                    ]
+                    st.dataframe(
+                        defined_data, use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.info("No defined variables found")
+
+            with var_tabs[1]:
+                # Used variables
+                if results["used_variables"]:
+                    import pandas as pd
+
+                    st.dataframe(
+                        pd.DataFrame(
+                            {"Variable": sorted(set(results["used_variables"]))}
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("No variable usage found")
+
+            with var_tabs[2]:
+                # Undefined variables (potential issues)
+                if results["undefined"]:
+                    import pandas as pd
+
+                    st.warning(f"Found {len(results['undefined'])} undefined variables")
+                    st.dataframe(
+                        pd.DataFrame({"Undefined Variable": results["undefined"]}),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    st.caption(
+                        "These variables are used but not defined in any process group"
+                    )
+                else:
+                    st.success("No undefined variables!")
+
+            with var_tabs[3]:
+                # By processor
+                if results["by_processor"]:
+                    import pandas as pd
+
+                    proc_var_data = [
+                        {
+                            "Processor ID": proc_id,
+                            "Variables Used": ", ".join(sorted(variables)),
+                        }
+                        for proc_id, variables in results["by_processor"].items()
+                    ]
+                    st.dataframe(
+                        proc_var_data, use_container_width=True, hide_index=True
+                    )
+                else:
+                    st.info("No processor-variable mappings found")
+
+            # Export button
+            if results["defined_variables"] or results["used_variables"]:
+                import pandas as pd
+
+                export_data = {
+                    "Defined": list(results["defined_variables"].keys()),
+                    "Used": sorted(set(results["used_variables"])),
+                    "Undefined": results["undefined"],
+                }
+                # Pad lists to same length for DataFrame
+                max_len = max(len(v) for v in export_data.values())
+                for key in export_data:
+                    export_data[key] += [""] * (max_len - len(export_data[key]))
+
+                csv = pd.DataFrame(export_data).to_csv(index=False)
+                st.download_button(
+                    label="Download variables as CSV",
+                    data=csv,
+                    file_name="nifi_variables.csv",
+                    mime="text/csv",
+                )
 
     else:
         st.info("👆 Configure connection and fetch a flow to begin analysis")

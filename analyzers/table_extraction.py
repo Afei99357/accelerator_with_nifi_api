@@ -5,6 +5,7 @@ Extracts database table references from processor configurations.
 
 import re
 from typing import Any, Dict, List, Set
+
 from analyzers.base import BaseAnalyzer
 
 
@@ -193,9 +194,29 @@ class TableExtractionAnalyzer(BaseAnalyzer):
             True if it's a SQL keyword
         """
         keywords = {
-            "SELECT", "WHERE", "AND", "OR", "AS", "ON", "IN", "EXISTS",
-            "NOT", "NULL", "IS", "LIKE", "BETWEEN", "CASE", "WHEN", "THEN",
-            "ELSE", "END", "GROUP", "ORDER", "BY", "HAVING", "LIMIT"
+            "SELECT",
+            "WHERE",
+            "AND",
+            "OR",
+            "AS",
+            "ON",
+            "IN",
+            "EXISTS",
+            "NOT",
+            "NULL",
+            "IS",
+            "LIKE",
+            "BETWEEN",
+            "CASE",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+            "GROUP",
+            "ORDER",
+            "BY",
+            "HAVING",
+            "LIMIT",
         }
         return word.upper() in keywords
 

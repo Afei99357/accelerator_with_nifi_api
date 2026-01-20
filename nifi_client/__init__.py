@@ -1,9 +1,9 @@
 """NiFi REST API client modules."""
 
 from nifi_client.client import (
+    AuthType,
     NiFiClient,
     NiFiConnectionConfig,
-    AuthType,
     create_nifi_client_from_env,
 )
 from nifi_client.converter import convert_nifi_json_to_template_dto

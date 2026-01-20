@@ -1,12 +1,16 @@
 """Example usage of NiFi API Analyzer."""
 
-from nifi_client import NiFiClient, NiFiConnectionConfig, AuthType, convert_nifi_json_to_template_dto
 from analyzers import (
-    ClassificationAnalyzer,
-    TableExtractionAnalyzer,
-    SQLExtractionAnalyzer,
     LineageAnalyzer,
+    SQLExtractionAnalyzer,
+    TableExtractionAnalyzer,
     VariablesAnalyzer,
+)
+from nifi_client import (
+    AuthType,
+    NiFiClient,
+    NiFiConnectionConfig,
+    convert_nifi_json_to_template_dto,
 )
 
 
@@ -21,7 +25,7 @@ def main():
         protocol="https",
         auth_type=AuthType.NONE,
         verify_ssl=False,  # For self-signed certificates
-        timeout=30
+        timeout=30,
     )
 
     # Step 2: Create client and test connection
@@ -39,7 +43,7 @@ def main():
     print("\nFetching flow from NiFi...")
     try:
         flow_json = client.fetch_flow("root")
-        print(f"✓ Flow fetched successfully")
+        print("✓ Flow fetched successfully")
     except Exception as e:
         print(f"✗ Error fetching flow: {e}")
         return
@@ -47,13 +51,11 @@ def main():
     # Step 4: Convert to template_dto format
     print("\nConverting flow to template_dto format...")
     template_dto = convert_nifi_json_to_template_dto(
-        flow_json,
-        use_friendly_ids=False,
-        ignore_pass_through=True
+        flow_json, use_friendly_ids=False, ignore_pass_through=True
     )
 
     snippet = template_dto.get("snippet", {})
-    print(f"✓ Flow converted:")
+    print("✓ Flow converted:")
     print(f"  - Processors: {len(snippet.get('processors', []))}")
     print(f"  - Connections: {len(snippet.get('connections', []))}")
     print(f"  - Process Groups: {len(snippet.get('processGroups', []))}")
@@ -63,20 +65,8 @@ def main():
     print("ANALYSIS RESULTS")
     print("=" * 60)
 
-    # Classification Analysis
-    print("\n1. Processor Classification")
-    print("-" * 60)
-    classifier = ClassificationAnalyzer(template_dto)
-    class_results = classifier.analyze()
-
-    print(f"Total processors: {class_results['total_processors']}")
-    print("\nBy category:")
-    for category, count in class_results["summary"].items():
-        if count > 0:
-            print(f"  - {category}: {count}")
-
     # Table Extraction
-    print("\n2. Database Tables")
+    print("\n1. Database Tables")
     print("-" * 60)
     table_analyzer = TableExtractionAnalyzer(template_dto)
     table_results = table_analyzer.analyze()
@@ -90,7 +80,7 @@ def main():
             print(f"  ... and {len(table_results['tables']) - 10} more")
 
     # SQL Extraction
-    print("\n3. SQL Queries")
+    print("\n2. SQL Queries")
     print("-" * 60)
     sql_analyzer = SQLExtractionAnalyzer(template_dto)
     sql_results = sql_analyzer.analyze()
@@ -102,7 +92,7 @@ def main():
             print(f"  - {sql_type}: {len(queries)}")
 
     # Lineage Analysis
-    print("\n4. Data Lineage")
+    print("\n3. Data Lineage")
     print("-" * 60)
     lineage_analyzer = LineageAnalyzer(template_dto)
     lineage_results = lineage_analyzer.analyze()
@@ -120,7 +110,7 @@ def main():
     print(f"Sink tables (no downstream): {len(sink_tables)}")
 
     # Variables Analysis
-    print("\n5. Variables")
+    print("\n4. Variables")
     print("-" * 60)
     var_analyzer = VariablesAnalyzer(template_dto)
     var_results = var_analyzer.analyze()

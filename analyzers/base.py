@@ -3,8 +3,8 @@
 All analyzers inherit from BaseAnalyzer and work with template_dto structure.
 """
 
-from typing import Any, Dict, List
 from abc import ABC, abstractmethod
+from typing import Any, Dict, List
 
 
 class BaseAnalyzer(ABC):
@@ -22,7 +22,9 @@ class BaseAnalyzer(ABC):
         self.processors = template_dto.get("snippet", {}).get("processors", [])
         self.connections = template_dto.get("snippet", {}).get("connections", [])
         self.process_groups = template_dto.get("snippet", {}).get("processGroups", [])
-        self.controller_services = template_dto.get("snippet", {}).get("controllerServices", [])
+        self.controller_services = template_dto.get("snippet", {}).get(
+            "controllerServices", []
+        )
 
     @abstractmethod
     def analyze(self) -> Dict[str, Any]:
@@ -33,7 +35,9 @@ class BaseAnalyzer(ABC):
         """
         pass
 
-    def _get_all_processors(self, snippet: Dict[str, Any] = None, collected: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def _get_all_processors(
+        self, snippet: Dict[str, Any] = None, collected: List[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
         """Recursively get all processors from snippet including nested process groups.
 
         Args:
@@ -60,7 +64,9 @@ class BaseAnalyzer(ABC):
 
         return collected
 
-    def _get_all_connections(self, snippet: Dict[str, Any] = None, collected: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def _get_all_connections(
+        self, snippet: Dict[str, Any] = None, collected: List[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
         """Recursively get all connections from snippet including nested process groups.
 
         Args:
