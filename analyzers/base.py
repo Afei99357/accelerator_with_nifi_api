@@ -3,6 +3,7 @@
 All analyzers inherit from BaseAnalyzer and work with template_dto structure.
 """
 
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 
@@ -121,3 +122,34 @@ class BaseAnalyzer(ABC):
         config = processor.get("config", {})
         properties = config.get("properties", {})
         return properties.get(property_name, "")
+
+    def _get_all_properties(self, processor: Dict[str, Any]) -> Dict[str, str]:
+        """Get all properties from processor config.
+
+        Args:
+            processor: Processor dict
+
+        Returns:
+            Dict mapping property names to values
+        """
+        config = processor.get("config", {})
+        return config.get("properties", {})
+
+    def _search_properties(
+        self, processor: Dict[str, Any], pattern: str
+    ) -> Dict[str, str]:
+        """Search for properties matching a name pattern.
+
+        Args:
+            processor: Processor dict
+            pattern: Regex pattern to match property names against
+
+        Returns:
+            Dict of matching property names to values
+        """
+        all_props = self._get_all_properties(processor)
+        return {
+            name: value
+            for name, value in all_props.items()
+            if re.search(pattern, name, re.IGNORECASE)
+        }

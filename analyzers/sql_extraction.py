@@ -45,6 +45,8 @@ class SQLExtractionAnalyzer(BaseAnalyzer):
             "DELETE": [],
             "CREATE": [],
             "DROP": [],
+            "DDL": [],
+            "MULTI": [],
             "UNKNOWN": [],
         }
 
@@ -94,16 +96,17 @@ class SQLExtractionAnalyzer(BaseAnalyzer):
             List of query info dicts
         """
         queries = []
-        config = processor.get("config", {})
-        properties = config.get("properties", {})
 
-        # Check SQL properties
-        for prop_name in self.SQL_PROPERTIES:
-            value = properties.get(prop_name, "")
-            if value and value.strip():
-                query_info = self._parse_sql_query(value, prop_name)
-                if query_info:
-                    queries.append(query_info)
+        # Search ALL properties for SQL, not just known property names
+        all_properties = self._get_all_properties(processor)
+
+        for prop_name, prop_value in all_properties.items():
+            if prop_value and isinstance(prop_value, str):
+                # Check if this property contains SQL
+                if self._contains_sql(prop_value):
+                    query_info = self._parse_sql_query(prop_value, prop_name)
+                    if query_info:
+                        queries.append(query_info)
 
         return queries
 
@@ -145,6 +148,63 @@ class SQLExtractionAnalyzer(BaseAnalyzer):
             "length": len(sql_clean),
         }
 
+    def _contains_sql(self, text: str) -> bool:
+        """Check if text contains SQL.
+
+        Args:
+            text: Text to check
+
+        Returns:
+            True if text appears to contain SQL
+        """
+        if not text or not isinstance(text, str):
+            return False
+
+        text_upper = text.upper()
+
+        # Filter out obvious non-SQL content
+        # Skip Java/Groovy/Python imports and code
+        non_sql_indicators = [
+            "IMPORT JAVA",
+            "IMPORT ORG",
+            "IMPORT COM",
+            "IMPORT GROOVY",
+            "FROM JAVA",
+            "PACKAGE ",
+            "PUBLIC CLASS",
+            "PRIVATE CLASS",
+            "DEF ",
+            "FUNCTION(",
+            "FLOWFILE",
+            ".GETATTRIBUTE",
+            ".PUTATTRIBUTE",
+        ]
+
+        if any(indicator in text_upper for indicator in non_sql_indicators):
+            return False
+
+        # SQL keywords that indicate SQL content
+        # Use more specific patterns to avoid false positives
+        sql_patterns = [
+            r"\bSELECT\s+",
+            r"\bINSERT\s+INTO\s+",
+            r"\bUPDATE\s+\w+\s+SET\s+",
+            r"\bDELETE\s+FROM\s+",
+            r"\bCREATE\s+TABLE\s+",
+            r"\bDROP\s+TABLE\s+",
+            r"\bALTER\s+TABLE\s+",
+            r"\bTRUNCATE\s+TABLE\s+",
+            r"\bMERGE\s+INTO\s+",
+            r"\bINVALIDATE\s+METADATA",  # Impala-specific
+            r"\bREFRESH\s+\w+\.\w+",  # Impala REFRESH table
+            r"\bCOMPUTE\s+STATS",  # Impala-specific
+        ]
+
+        import re
+
+        # Check if any SQL pattern matches
+        return any(re.search(pattern, text_upper) for pattern in sql_patterns)
+
     def _determine_sql_type(self, sql: str) -> str:
         """Determine the type of SQL statement.
 
@@ -154,7 +214,17 @@ class SQLExtractionAnalyzer(BaseAnalyzer):
         Returns:
             SQL type (SELECT, INSERT, UPDATE, etc.)
         """
-        sql_upper = sql.upper().strip()
+        # Strip comments and normalize whitespace for better detection
+        sql_clean = sql.strip()
+
+        # Remove SQL comments (-- and /* */)
+        import re
+
+        sql_clean = re.sub(r"--[^\n]*", "", sql_clean)  # Remove -- comments
+        sql_clean = re.sub(r"/\*.*?\*/", "", sql_clean, flags=re.DOTALL)  # Remove /* */
+        sql_clean = sql_clean.strip()
+
+        sql_upper = sql_clean.upper()
 
         if sql_upper.startswith("SELECT"):
             return "SELECT"
@@ -174,6 +244,19 @@ class SQLExtractionAnalyzer(BaseAnalyzer):
             return "MERGE"
         elif sql_upper.startswith("WITH"):
             return "SELECT"  # CTE
+        elif sql_upper.startswith("INVALIDATE"):
+            return "DDL"  # Impala INVALIDATE METADATA
+        elif sql_upper.startswith("REFRESH"):
+            return "DDL"  # Impala REFRESH
+        elif sql_upper.startswith("COMPUTE"):
+            return "DDL"  # Impala COMPUTE STATS
+        elif sql_upper.startswith("ALTER"):
+            return "DDL"
+        # Check for multi-statement SQL (contains semicolons)
+        elif ";" in sql_clean and any(
+            kw in sql_upper for kw in ["INSERT", "REFRESH", "CREATE", "DROP"]
+        ):
+            return "MULTI"
         else:
             return "UNKNOWN"
 

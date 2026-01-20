@@ -106,24 +106,17 @@ class TableExtractionAnalyzer(BaseAnalyzer):
             Set of table names
         """
         tables = set()
-        config = processor.get("config", {})
-        properties = config.get("properties", {})
 
-        # Check table name properties
-        for prop_name in self.TABLE_PROPERTIES:
-            value = properties.get(prop_name, "")
-            if value and value.strip():
-                # Clean and add table name
-                table = self._clean_table_name(value)
-                if table:
-                    tables.add(table)
+        # Search ALL properties for tables, not just known property names
+        all_properties = self._get_all_properties(processor)
 
-        # Check SQL properties for table references
-        for prop_name in self.SQL_PROPERTIES:
-            value = properties.get(prop_name, "")
-            if value:
-                sql_tables = self._extract_tables_from_sql(value)
-                tables.update(sql_tables)
+        for prop_name, prop_value in all_properties.items():
+            if prop_value and isinstance(prop_value, str):
+                # Extract tables from text using multiple patterns
+                tables.update(self._extract_tables_from_text(prop_value))
+
+                # Also try JDBC URL extraction
+                tables.update(self._extract_from_jdbc_url(prop_value))
 
         return tables
 
@@ -183,6 +176,145 @@ class TableExtractionAnalyzer(BaseAnalyzer):
                     tables.add(table)
 
         return tables
+
+    def _extract_tables_from_text(self, text: str) -> Set[str]:
+        """Extract table names from any text using multiple patterns.
+
+        This method searches for tables in various formats:
+        - schema.table or db.table patterns
+        - SQL statements with keywords
+        - Impala INVALIDATE METADATA statements
+
+        Args:
+            text: Text to search
+
+        Returns:
+            Set of table names found
+        """
+        if not text or not isinstance(text, str):
+            return set()
+
+        tables = set()
+
+        # Pattern 1: schema.table or db.table (word boundaries)
+        # Matches: be_aoi.bin_die_list_tbl, ${db_temp}.MES_${db_table}
+        schema_table_pattern = r"\b([a-z_$][a-z0-9_$]*\.[a-z_$][a-z0-9_$]*)\b"
+        matches = re.findall(schema_table_pattern, text, re.IGNORECASE)
+        for match in matches:
+            # Filter out common non-table patterns
+            if not self._is_likely_false_positive(match):
+                tables.add(match)
+
+        # Pattern 2: SQL keywords + table name
+        sql_patterns = [
+            r"FROM\s+([a-z_$][a-z0-9_.$]*)",
+            r"INTO\s+([a-z_$][a-z0-9_.$]*)",
+            r"TABLE\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?([a-z_$][a-z0-9_.$]*)",
+            r"UPDATE\s+([a-z_$][a-z0-9_.$]*)",
+            r"OVERWRITE\s+TABLE\s+([a-z_$][a-z0-9_.$]*)",
+            r"METADATA\s+([a-z_$][a-z0-9_.$]*)",  # For INVALIDATE METADATA
+        ]
+
+        for pattern in sql_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                table = match.strip()
+                # Skip SQL keywords
+                if not self._is_sql_keyword(table):
+                    tables.add(table)
+
+        return tables
+
+    def _extract_from_jdbc_url(self, text: str) -> Set[str]:
+        """Extract schema/database names from JDBC URLs.
+
+        Args:
+            text: Text that may contain JDBC URL
+
+        Returns:
+            Set of schema/database names
+        """
+        if not text or "jdbc:" not in text.lower():
+            return set()
+
+        schemas = set()
+
+        # Pattern: jdbc:oracle:thin:@host:port:SCHEMA
+        oracle_match = re.search(
+            r"jdbc:oracle:thin:@[^:]+:\d+:([^/\s;]+)", text, re.IGNORECASE
+        )
+        if oracle_match:
+            schemas.add(oracle_match.group(1))
+
+        # Pattern: jdbc:mysql://host:port/DATABASE
+        mysql_match = re.search(r"jdbc:mysql://[^/]+/([^?\s;]+)", text, re.IGNORECASE)
+        if mysql_match:
+            schemas.add(mysql_match.group(1))
+
+        # Pattern: jdbc:postgresql://host:port/DATABASE
+        postgres_match = re.search(
+            r"jdbc:postgresql://[^/]+/([^?\s;]+)", text, re.IGNORECASE
+        )
+        if postgres_match:
+            schemas.add(postgres_match.group(1))
+
+        return schemas
+
+    def _is_likely_false_positive(self, table_name: str) -> bool:
+        """Check if a table-like pattern is likely a false positive.
+
+        Args:
+            table_name: Potential table name
+
+        Returns:
+            True if likely not a real table name
+        """
+        # Filter out common false positives
+        false_positive_prefixes = [
+            "java.",
+            "org.",
+            "com.",
+            "nifi.",
+            "apache.",
+            "system.",
+            "file.",
+            "localdate.",
+            "localdatetime.",
+            "datetimeformatter.",
+            "string.",
+            "integer.",
+            "boolean.",
+        ]
+
+        # Filter out standalone SQL keywords that might match the pattern
+        sql_keyword_tables = {
+            "insert",
+            "select",
+            "update",
+            "delete",
+            "refresh",
+            "create",
+            "drop",
+            "alter",
+            "truncate",
+            "merge",
+        }
+
+        table_lower = table_name.lower()
+
+        # Check prefixes
+        if any(table_lower.startswith(fp) for fp in false_positive_prefixes):
+            return True
+
+        # Check if it's just a SQL keyword
+        if table_lower in sql_keyword_tables:
+            return True
+
+        # Check if it's a single character (like just "$")
+        if len(table_name) <= 1:
+            return True
+
+        return False
 
     def _is_sql_keyword(self, word: str) -> bool:
         """Check if word is a common SQL keyword.
