@@ -139,11 +139,12 @@ def main():
 
                         # Debug mode: Show raw response structure
                         if debug_mode:
+                            import json
+                            from datetime import datetime
+
                             with st.expander(
                                 "🔍 Debug: Raw API Response", expanded=False
                             ):
-                                st.json(flow_json)
-
                                 # Show structure analysis
                                 st.subheader("Response Structure")
                                 pg_flow = flow_json.get("processGroupFlow", {})
@@ -171,6 +172,22 @@ def main():
                                     st.write("Processor states:", states)
                                 else:
                                     st.warning("⚠️ No processors found in API response!")
+
+                                # Save to file instead of displaying
+                                st.divider()
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                filename = f"debug_api_response_{process_group_id}_{timestamp}.json"
+                                filepath = Path(__file__).parent.parent / filename
+
+                                try:
+                                    with open(filepath, "w") as f:
+                                        json.dump(flow_json, f, indent=2)
+                                    st.success(
+                                        f"✅ Raw API response saved to: `{filename}`"
+                                    )
+                                    st.info(f"Full path: `{filepath}`")
+                                except Exception as e:
+                                    st.error(f"Failed to save file: {e}")
 
                         # Convert to template_dto
                         template_dto = convert_nifi_json_to_template_dto(
@@ -204,6 +221,22 @@ def main():
                                         "only RUNNING processors included"
                                     )
                                     st.info(msg)
+
+                                # Save converted template_dto to file
+                                st.divider()
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                filename = f"debug_template_dto_{process_group_id}_{timestamp}.json"
+                                filepath = Path(__file__).parent.parent / filename
+
+                                try:
+                                    with open(filepath, "w") as f:
+                                        json.dump(template_dto, f, indent=2)
+                                    st.success(
+                                        f"✅ Converted template_dto saved to: `{filename}`"
+                                    )
+                                    st.info(f"Full path: `{filepath}`")
+                                except Exception as e:
+                                    st.error(f"Failed to save file: {e}")
 
                         # Store in session state
                         st.session_state["template_dto"] = template_dto
