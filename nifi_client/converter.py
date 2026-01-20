@@ -31,39 +31,37 @@ def convert_nifi_json_to_template_dto(
     Returns:
         Dict in TemplateDTO format compatible with existing analysis pipeline
 
-    The NiFi API response structure:
+    The NiFi API /download endpoint response structure:
     {
-        "processGroupFlow": {
-            "id": "root",
-            "parentGroupId": null,
-            "flow": {
-                "processGroups": [...],
-                "processors": [...],
-                "connections": [...],
-                "inputPorts": [...],
-                "outputPorts": [...],
-                "funnels": [...],
-                "remoteProcessGroups": [...],
-                "controllerServices": [...]
-            },
-            "parameterContext": {...},
-            "flowfilesQueued": {...},
-            ...
-        }
+        "flowContents": {
+            "identifier": "...",
+            "instanceIdentifier": "...",
+            "name": "...",
+            "processors": [...],
+            "processGroups": [...],
+            "connections": [...],
+            "inputPorts": [...],
+            "outputPorts": [...],
+            "funnels": [...],
+            "remoteProcessGroups": [...],
+            "controllerServices": [...]
+        },
+        "parameterContexts": {...},
+        "externalControllerServices": {...}
     }
     """
     # Create ID mapper
     id_mapper = IdMapper(use_friendly_ids=use_friendly_ids)
 
-    # Extract process group flow
-    pg_flow = nifi_json.get("processGroupFlow", {})
-    flow_contents = pg_flow.get("flow", {})
+    # Extract flow contents from /download endpoint
+    flow_contents = nifi_json.get("flowContents", {})
 
     # Validate response structure
-    if not pg_flow:
-        logger.warning("API response missing 'processGroupFlow' key")
     if not flow_contents:
-        logger.warning("API response missing 'flow' key inside processGroupFlow")
+        raise ValueError(
+            "Invalid API response: missing 'flowContents'. "
+            "Ensure using /process-groups/{id}/download endpoint"
+        )
 
     # Log processor count from raw API
     raw_processor_count = len(flow_contents.get("processors", []))
@@ -71,8 +69,8 @@ def convert_nifi_json_to_template_dto(
         f"Raw API response contains {raw_processor_count} processors at root level"
     )
 
-    # Get process group metadata
-    pg_id_raw = pg_flow.get("id", "root")
+    # Get process group metadata using instanceIdentifier
+    pg_id_raw = flow_contents.get("instanceIdentifier", "root")
     pg_id = id_mapper.get_friendly_id(pg_id_raw, "processGroup")
 
     # Generate template metadata
@@ -127,9 +125,10 @@ def _convert_flow_to_snippet(
     processors = []
     for proc in flow.get("processors", []):
         proc_dto = _convert_processor(proc, parent_group_id, id_mapper)
-        # Only filter if requested
+        # Only filter if requested (scheduledState is now mapped to state field)
         if filter_running_only:
-            if proc_dto.get("state") == "RUNNING":
+            # In /download format, ENABLED means the processor is scheduled to run
+            if proc_dto.get("state") == "ENABLED":
                 processors.append(proc_dto)
         else:
             processors.append(proc_dto)
@@ -214,56 +213,49 @@ def _convert_processor(
 ) -> Dict[str, Any]:
     """Convert NiFi processor JSON to TemplateDTO processor format.
 
-    NiFi API processor structure:
+    NiFi /download endpoint processor structure:
     {
-        "id": "uuid",
-        "parentGroupId": "parent-uuid",
-        "component": {
-            "id": "uuid",
-            "name": "ProcessorName",
-            "type": "org.apache.nifi.processors.standard.LogAttribute",
-            "config": {
-                "properties": {"key": "value", ...},
-                "comments": "...",
-                "schedulingPeriod": "0 sec",
-                "schedulingStrategy": "TIMER_DRIVEN",
-                ...
-            },
-            "state": "RUNNING",
-            ...
-        },
-        "status": {...},
+        "identifier": "uuid",
+        "instanceIdentifier": "uuid",
+        "groupIdentifier": "parent-uuid",
+        "name": "ProcessorName",
+        "type": "org.apache.nifi.processors.standard.LogAttribute",
+        "properties": {"key": "value", ...},
+        "comments": "...",
+        "schedulingPeriod": "0 sec",
+        "schedulingStrategy": "TIMER_DRIVEN",
+        "scheduledState": "ENABLED",
         ...
     }
     """
-    # NiFi API wraps data in "component" and uses "id" at top level
-    component = proc_json.get("component", proc_json)
-
-    proc_id_raw = component.get("id", "")
+    # Direct access - no component wrapper in /download format
+    proc_id_raw = proc_json.get("identifier", "")
     proc_id = id_mapper.get_friendly_id(proc_id_raw, "processor")
 
-    parent_group_id_raw = component.get("parentGroupId", parent_group_id)
+    parent_group_id_raw = proc_json.get("groupIdentifier", parent_group_id)
     mapped_parent_group_id = id_mapper.get_friendly_id(
         parent_group_id_raw, "processGroup"
     )
 
-    # Parse config
-    config_json = component.get("config", {})
+    # Properties are at root level in /download format
     config = {
-        "properties": config_json.get("properties", {}),
-        "comments": config_json.get("comments"),
-        "schedulingPeriod": config_json.get("schedulingPeriod"),
-        "schedulingStrategy": config_json.get("schedulingStrategy"),
+        "properties": proc_json.get("properties", {}),
+        "comments": proc_json.get("comments"),
+        "schedulingPeriod": proc_json.get("schedulingPeriod"),
+        "schedulingStrategy": proc_json.get("schedulingStrategy"),
     }
+
+    # Map scheduledState to state (ENABLED -> ENABLED for filtering)
+    state = proc_json.get("scheduledState", "STOPPED")
 
     return {
         "componentType": "processor",
         "id": proc_id,
-        "name": component.get("name", ""),
-        "type": component.get("type", ""),
+        "name": proc_json.get("name", ""),
+        "type": proc_json.get("type", ""),
         "parentGroupId": mapped_parent_group_id,
         "config": config,
-        "state": component.get("state", "STOPPED"),
+        "state": state,
     }
 
 
@@ -272,39 +264,37 @@ def _convert_connection(
 ) -> Dict[str, Any]:
     """Convert NiFi connection JSON to TemplateDTO connection format.
 
-    NiFi API connection structure:
+    NiFi /download endpoint connection structure:
     {
-        "id": "uuid",
-        "component": {
-            "id": "uuid",
-            "name": "...",
-            "source": {
-                "id": "source-uuid",
-                "groupId": "group-uuid",
-                "type": "PROCESSOR"
-            },
-            "destination": {
-                "id": "dest-uuid",
-                "groupId": "group-uuid",
-                "type": "PROCESSOR"
-            },
-            "selectedRelationships": ["success", "failure"],
-            ...
-        }
+        "identifier": "uuid",
+        "instanceIdentifier": "uuid",
+        "groupIdentifier": "group-uuid",
+        "name": "...",
+        "source": {
+            "id": "source-uuid",
+            "groupId": "group-uuid",
+            "type": "PROCESSOR"
+        },
+        "destination": {
+            "id": "dest-uuid",
+            "groupId": "group-uuid",
+            "type": "PROCESSOR"
+        },
+        "selectedRelationships": ["success", "failure"],
+        ...
     }
     """
-    component = conn_json.get("component", conn_json)
-
-    conn_id_raw = component.get("id", "")
+    # Direct access - no component wrapper in /download format
+    conn_id_raw = conn_json.get("identifier", "")
     conn_id = id_mapper.get_friendly_id(conn_id_raw, "connection")
 
-    parent_group_id_raw = component.get("parentGroupId", parent_group_id)
+    parent_group_id_raw = conn_json.get("groupIdentifier", parent_group_id)
     mapped_parent_group_id = id_mapper.get_friendly_id(
         parent_group_id_raw, "processGroup"
     )
 
     # Parse source
-    source_json = component.get("source", {})
+    source_json = conn_json.get("source", {})
     source_id_raw = source_json.get("id", "")
     source_type = source_json.get("type", "PROCESSOR")
 
@@ -333,7 +323,7 @@ def _convert_connection(
     }
 
     # Parse destination
-    dest_json = component.get("destination", {})
+    dest_json = conn_json.get("destination", {})
     dest_id_raw = dest_json.get("id", "")
     dest_type = dest_json.get("type", "PROCESSOR")
 
@@ -357,7 +347,7 @@ def _convert_connection(
         "componentType": "connection",
         "id": conn_id,
         "parentGroupId": mapped_parent_group_id,
-        "name": component.get("name"),
+        "name": conn_json.get("name"),
         "source": source,
         "destination": destination,
     }
@@ -372,60 +362,48 @@ def _convert_process_group(
 ) -> Dict[str, Any]:
     """Convert NiFi process group JSON to TemplateDTO process group format.
 
-    NiFi API process group structure:
+    NiFi /download endpoint process group structure:
     {
-        "id": "uuid",
-        "component": {
-            "id": "uuid",
-            "name": "ProcessGroupName",
-            "comments": "...",
-            "contents": {
-                "processors": [...],
-                "connections": [...],
-                ...
-            },
-            ...
-        }
+        "identifier": "uuid",
+        "instanceIdentifier": "uuid",
+        "groupIdentifier": "parent-uuid",
+        "name": "ProcessGroupName",
+        "comments": "...",
+        "variables": {"key": "value", ...},
+        "processors": [...],
+        "connections": [...],
+        "processGroups": [...],
+        ...
     }
     """
-    component = pg_json.get("component", pg_json)
-
-    pg_id_raw = component.get("id", "")
+    # Direct access - no component wrapper in /download format
+    pg_id_raw = pg_json.get("identifier", "")
     pg_id = id_mapper.get_friendly_id(pg_id_raw, "processGroup")
 
-    parent_group_id_raw = component.get("parentGroupId", parent_group_id)
+    parent_group_id_raw = pg_json.get("groupIdentifier", parent_group_id)
     mapped_parent_group_id = id_mapper.get_friendly_id(
         parent_group_id_raw, "processGroup"
     )
 
-    # Parse variables
-    variables = {}
-    var_registry = component.get("variableRegistry", {})
-    if var_registry:
-        for var in var_registry.get("variables", []):
-            var_name = var.get("name") or var.get("variable", {}).get("name")
-            var_value = var.get("value") or var.get("variable", {}).get("value")
-            if var_name:
-                variables[var_name] = var_value
+    # Variables are a direct dict in /download format
+    variables = pg_json.get("variables", {})
 
-    # Parse contents (nested flow)
-    contents = {}
-    contents_json = component.get("contents", {})
-    if contents_json:
-        contents = _convert_flow_to_snippet(
-            contents_json,
-            parent_group_id=pg_id,
-            id_mapper=id_mapper,
-            ignore_pass_through=ignore_pass_through,
-            filter_running_only=filter_running_only,
-        )
+    # In /download format, pg_json itself contains processors, connections, etc.
+    # Recursively convert the nested flow
+    contents = _convert_flow_to_snippet(
+        pg_json,  # Pass the PG itself as the flow
+        parent_group_id=pg_id,
+        id_mapper=id_mapper,
+        ignore_pass_through=ignore_pass_through,
+        filter_running_only=filter_running_only,
+    )
 
     return {
         "componentType": "processGroup",
         "id": pg_id,
-        "name": component.get("name", ""),
+        "name": pg_json.get("name", ""),
         "parentGroupId": mapped_parent_group_id,
-        "comments": component.get("comments"),
+        "comments": pg_json.get("comments"),
         "variables": variables if variables else None,
         "contents": contents,
     }
@@ -435,11 +413,10 @@ def _convert_controller_service(
     cs_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi controller service JSON to TemplateDTO format."""
-    component = cs_json.get("component", cs_json)
+    # Direct access - no component wrapper in /download format
+    cs_id = cs_json.get("identifier", "")  # Controller services keep original IDs
 
-    cs_id = component.get("id", "")  # Controller services keep original IDs
-
-    parent_group_id_raw = component.get("parentGroupId", parent_group_id)
+    parent_group_id_raw = cs_json.get("groupIdentifier", parent_group_id)
     mapped_parent_group_id = id_mapper.get_friendly_id(
         parent_group_id_raw, "processGroup"
     )
@@ -447,14 +424,14 @@ def _convert_controller_service(
     return {
         "componentType": "controllerService",
         "id": cs_id,
-        "name": component.get("name", ""),
-        "type": component.get("type", ""),
+        "name": cs_json.get("name", ""),
+        "type": cs_json.get("type", ""),
         "parentGroupId": mapped_parent_group_id,
-        "properties": component.get("properties", {}),
-        "bulletinLevel": component.get("bulletinLevel"),
-        "comments": component.get("comments"),
-        "persistsState": component.get("persistsState"),
-        "state": component.get("state", "DISABLED"),
+        "properties": cs_json.get("properties", {}),
+        "bulletinLevel": cs_json.get("bulletinLevel"),
+        "comments": cs_json.get("comments"),
+        "persistsState": cs_json.get("persistsState"),
+        "state": cs_json.get("state", "DISABLED"),
     }
 
 
@@ -462,12 +439,11 @@ def _convert_input_port(
     ip_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi input port JSON to TemplateDTO format."""
-    component = ip_json.get("component", ip_json)
-
-    ip_id_raw = component.get("id", "")
+    # Direct access - no component wrapper in /download format
+    ip_id_raw = ip_json.get("identifier", "")
     ip_id = id_mapper.get_friendly_id(ip_id_raw, "inputPort")
 
-    parent_group_id_raw = component.get("parentGroupId", parent_group_id)
+    parent_group_id_raw = ip_json.get("groupIdentifier", parent_group_id)
     mapped_parent_group_id = id_mapper.get_friendly_id(
         parent_group_id_raw, "processGroup"
     )
@@ -475,11 +451,11 @@ def _convert_input_port(
     return {
         "componentType": "inputPort",
         "id": ip_id,
-        "name": component.get("name", ""),
+        "name": ip_json.get("name", ""),
         "parentGroupId": mapped_parent_group_id,
-        "comments": component.get("comments"),
-        "state": component.get("state", "STOPPED"),
-        "type": component.get("type"),
+        "comments": ip_json.get("comments"),
+        "state": ip_json.get("scheduledState", "STOPPED"),
+        "type": ip_json.get("type"),
     }
 
 
@@ -487,12 +463,11 @@ def _convert_output_port(
     op_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi output port JSON to TemplateDTO format."""
-    component = op_json.get("component", op_json)
-
-    op_id_raw = component.get("id", "")
+    # Direct access - no component wrapper in /download format
+    op_id_raw = op_json.get("identifier", "")
     op_id = id_mapper.get_friendly_id(op_id_raw, "outputPort")
 
-    parent_group_id_raw = component.get("parentGroupId", parent_group_id)
+    parent_group_id_raw = op_json.get("groupIdentifier", parent_group_id)
     mapped_parent_group_id = id_mapper.get_friendly_id(
         parent_group_id_raw, "processGroup"
     )
@@ -500,11 +475,11 @@ def _convert_output_port(
     return {
         "componentType": "outputPort",
         "id": op_id,
-        "name": component.get("name", ""),
+        "name": op_json.get("name", ""),
         "parentGroupId": mapped_parent_group_id,
-        "comments": component.get("comments"),
-        "state": component.get("state", "STOPPED"),
-        "type": component.get("type"),
+        "comments": op_json.get("comments"),
+        "state": op_json.get("scheduledState", "STOPPED"),
+        "type": op_json.get("type"),
     }
 
 
@@ -512,12 +487,11 @@ def _convert_funnel(
     funnel_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi funnel JSON to TemplateDTO format."""
-    component = funnel_json.get("component", funnel_json)
-
-    funnel_id_raw = component.get("id", "")
+    # Direct access - no component wrapper in /download format
+    funnel_id_raw = funnel_json.get("identifier", "")
     funnel_id = id_mapper.get_friendly_id(funnel_id_raw, "funnel")
 
-    parent_group_id_raw = component.get("parentGroupId", parent_group_id)
+    parent_group_id_raw = funnel_json.get("groupIdentifier", parent_group_id)
     mapped_parent_group_id = id_mapper.get_friendly_id(
         parent_group_id_raw, "processGroup"
     )
@@ -533,11 +507,10 @@ def _convert_remote_process_group(
     rpg_json: Dict[str, Any], parent_group_id: str, id_mapper: IdMapper
 ) -> Dict[str, Any]:
     """Convert NiFi remote process group JSON to TemplateDTO format."""
-    component = rpg_json.get("component", rpg_json)
+    # Direct access - no component wrapper in /download format
+    rpg_id = rpg_json.get("identifier", "")  # Remote PGs keep original IDs
 
-    rpg_id = component.get("id", "")  # Remote PGs keep original IDs
-
-    parent_group_id_raw = component.get("parentGroupId", parent_group_id)
+    parent_group_id_raw = rpg_json.get("groupIdentifier", parent_group_id)
     mapped_parent_group_id = id_mapper.get_friendly_id(
         parent_group_id_raw, "processGroup"
     )
@@ -545,6 +518,6 @@ def _convert_remote_process_group(
     return {
         "componentType": "remoteProcessGroup",
         "id": rpg_id,
-        "name": component.get("name", ""),
+        "name": rpg_json.get("name", ""),
         "parentGroupId": mapped_parent_group_id,
     }
