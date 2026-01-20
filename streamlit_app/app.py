@@ -325,10 +325,21 @@ def main():
         with tabs[0]:
             st.subheader("Flow Overview")
 
+            # Helper function to count all processors recursively
+            def count_all_processors(snippet_data):
+                """Recursively count all processors including nested process groups."""
+                count = len(snippet_data.get("processors", []))
+                for pg in snippet_data.get("processGroups", []):
+                    count += count_all_processors(pg.get("contents", {}))
+                return count
+
+            total_processors = count_all_processors(snippet)
+
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                st.metric("Processors", len(snippet.get("processors", [])))
+                st.metric("Processors (total)", total_processors)
+                st.caption(f"Root level: {len(snippet.get('processors', []))}")
 
             with col2:
                 st.metric("Connections", len(snippet.get("connections", [])))
@@ -337,7 +348,20 @@ def main():
                 st.metric("Process Groups", len(snippet.get("processGroups", [])))
 
             st.subheader("Processor List")
-            processors = snippet.get("processors", [])
+
+            # Recursively collect ALL processors including nested ones
+            def get_all_processors(snippet_data):
+                """Extract all processors from snippet including nested groups."""
+                all_procs = []
+                # Add root level processors
+                all_procs.extend(snippet_data.get("processors", []))
+                # Recursively add processors from nested process groups
+                for pg in snippet_data.get("processGroups", []):
+                    pg_contents = pg.get("contents", {})
+                    all_procs.extend(get_all_processors(pg_contents))
+                return all_procs
+
+            processors = get_all_processors(snippet)
 
             if processors:
                 processor_data = []
@@ -346,12 +370,16 @@ def main():
                         {
                             "Name": proc.get("name", ""),
                             "Type": proc.get("type", "").split(".")[-1],
+                            "Parent Group": proc.get("parentGroupId", ""),
                             "State": proc.get("state", ""),
                             "ID": proc.get("id", ""),
                         }
                     )
 
-                st.dataframe(processor_data, use_container_width=True)
+                st.dataframe(processor_data, use_container_width=True, hide_index=True)
+                st.caption(
+                    f"Total processors (including nested groups): {len(processors)}"
+                )
             else:
                 st.info("No processors found")
 
