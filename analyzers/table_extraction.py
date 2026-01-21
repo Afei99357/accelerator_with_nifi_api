@@ -107,13 +107,14 @@ class TableExtractionAnalyzer(BaseAnalyzer):
         """
         tables = set()
 
-        # Search ALL properties for tables, not just known property names
+        # Search ALL properties for tables, but be smart about context
         all_properties = self._get_all_properties(processor)
 
         for prop_name, prop_value in all_properties.items():
             if prop_value and isinstance(prop_value, str):
-                # Extract tables from text using multiple patterns
-                tables.update(self._extract_tables_from_text(prop_value))
+                # Only extract tables if this looks like SQL content or table property
+                if self._is_sql_or_table_property(prop_name, prop_value):
+                    tables.update(self._extract_tables_from_text(prop_value))
 
                 # Also try JDBC URL extraction
                 tables.update(self._extract_from_jdbc_url(prop_value))
@@ -177,11 +178,56 @@ class TableExtractionAnalyzer(BaseAnalyzer):
 
         return tables
 
+    def _is_sql_or_table_property(self, prop_name: str, prop_value: str) -> bool:
+        """Check if a property likely contains SQL or table references.
+
+        Args:
+            prop_name: Property name
+            prop_value: Property value
+
+        Returns:
+            True if this property should be scanned for tables
+        """
+        prop_name_lower = prop_name.lower()
+
+        # Check for SQL-related property names
+        sql_keywords = [
+            "sql",
+            "query",
+            "statement",
+            "table",
+            "database",
+            "schema",
+            "metadata",
+        ]
+        if any(kw in prop_name_lower for kw in sql_keywords):
+            return True
+
+        # Check if value contains SQL keywords
+        if not prop_value or not isinstance(prop_value, str):
+            return False
+
+        value_upper = prop_value.upper()
+        sql_indicators = [
+            "SELECT ",
+            "INSERT ",
+            "UPDATE ",
+            "DELETE ",
+            "CREATE TABLE",
+            "DROP TABLE",
+            "ALTER TABLE",
+            "FROM ",
+            "INVALIDATE METADATA",
+            "REFRESH ",
+        ]
+
+        return any(indicator in value_upper for indicator in sql_indicators)
+
     def _extract_tables_from_text(self, text: str) -> Set[str]:
         """Extract table names from any text using multiple patterns.
 
         This method searches for tables in various formats:
-        - schema.table or db.table patterns
+        - schema.table or db.table patterns (only in SQL context)
         - SQL statements with keywords
         - Impala INVALIDATE METADATA statements
 
@@ -196,21 +242,24 @@ class TableExtractionAnalyzer(BaseAnalyzer):
 
         tables = set()
 
-        # Pattern 1: schema.table or db.table (word boundaries)
-        # Matches: be_aoi.bin_die_list_tbl, ${db_temp}.MES_${db_table}
-        schema_table_pattern = r"\b([a-z_$][a-z0-9_$]*\.[a-z_$][a-z0-9_$]*)\b"
-        matches = re.findall(schema_table_pattern, text, re.IGNORECASE)
-        for match in matches:
-            # Filter out common non-table patterns
-            if not self._is_likely_false_positive(match):
-                tables.add(match)
+        # Only extract schema.table patterns if we're confident this is SQL
+        # (not from generic Groovy/Java code)
+        if self._looks_like_sql(text):
+            # Pattern 1: schema.table or db.table (word boundaries)
+            # Matches: be_aoi.bin_die_list_tbl, ${db_temp}.MES_${db_table}
+            schema_table_pattern = r"\b([a-z_$][a-z0-9_$]*\.[a-z_$][a-z0-9_$]*)\b"
+            matches = re.findall(schema_table_pattern, text, re.IGNORECASE)
+            for match in matches:
+                # Filter out common non-table patterns
+                if not self._is_likely_false_positive(match):
+                    tables.add(match)
 
-        # Pattern 2: SQL keywords + table name
+        # Pattern 2: SQL keywords + table name (more reliable)
         sql_patterns = [
             r"FROM\s+([a-z_$][a-z0-9_.$]*)",
             r"INTO\s+([a-z_$][a-z0-9_.$]*)",
             r"TABLE\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?([a-z_$][a-z0-9_.$]*)",
-            r"UPDATE\s+([a-z_$][a-z0-9_.$]*)",
+            r"UPDATE\s+([a-z_$][a-z0-9_.$]*)\s+SET",
             r"OVERWRITE\s+TABLE\s+([a-z_$][a-z0-9_.$]*)",
             r"METADATA\s+([a-z_$][a-z0-9_.$]*)",  # For INVALIDATE METADATA
         ]
@@ -219,11 +268,61 @@ class TableExtractionAnalyzer(BaseAnalyzer):
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 table = match.strip()
-                # Skip SQL keywords
-                if not self._is_sql_keyword(table):
+                # Skip SQL keywords and apply filtering
+                if not self._is_sql_keyword(
+                    table
+                ) and not self._is_likely_false_positive(table):
                     tables.add(table)
 
         return tables
+
+    def _looks_like_sql(self, text: str) -> bool:
+        """Check if text looks like SQL (not Java/Groovy code).
+
+        Args:
+            text: Text to check
+
+        Returns:
+            True if this looks like SQL
+        """
+        text_upper = text.upper()
+
+        # If it contains Java/Groovy patterns, it's NOT SQL
+        code_indicators = [
+            "IMPORT ",
+            "FLOWFILE",
+            ".GETATTRIBUTE",
+            ".PUTATTRIBUTE",
+            "SESSION.",
+            "BINDING.",
+            "RESULTS.",
+            "SCRIPT.",
+            "EXECUTION.",
+            "FUNCTION(",
+            "DEF ",
+            "PUBLIC ",
+            "PRIVATE ",
+            "CLASS ",
+        ]
+
+        if any(indicator in text_upper for indicator in code_indicators):
+            return False
+
+        # Check for SQL keywords
+        sql_keywords = [
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "CREATE",
+            "DROP",
+            "ALTER",
+            "FROM",
+            "WHERE",
+            "INVALIDATE",
+        ]
+
+        return any(keyword in text_upper for keyword in sql_keywords)
 
     def _extract_from_jdbc_url(self, text: str) -> Set[str]:
         """Extract schema/database names from JDBC URLs.
@@ -269,8 +368,14 @@ class TableExtractionAnalyzer(BaseAnalyzer):
         Returns:
             True if likely not a real table name
         """
-        # Filter out common false positives
-        false_positive_prefixes = [
+        table_lower = table_name.lower()
+
+        # Filter out single character or very short names
+        if len(table_name) <= 1:
+            return True
+
+        # Filter out Java/Groovy class and package prefixes
+        java_prefixes = [
             "java.",
             "org.",
             "com.",
@@ -284,10 +389,72 @@ class TableExtractionAnalyzer(BaseAnalyzer):
             "string.",
             "integer.",
             "boolean.",
+            "format.",
         ]
+        if any(table_lower.startswith(fp) for fp in java_prefixes):
+            return True
 
-        # Filter out standalone SQL keywords that might match the pattern
-        sql_keyword_tables = {
+        # Filter out common NiFi/Groovy code patterns
+        code_patterns = [
+            "session.",
+            "flowfile.",
+            "binding.",
+            "results.",
+            "script.",
+            "execution.",
+            "e.",  # Exception handling (e.getCause, e.toString)
+            "log.",
+            "logger.",
+            "context.",
+        ]
+        if any(table_lower.startswith(cp) for cp in code_patterns):
+            return True
+
+        # Filter out property/config references
+        property_patterns = [
+            "db.name",
+            "db.table",
+            "drop.table",
+            "create.table",
+            "temp.table",
+            "table.create",
+            "table.merge",
+            "partition.sql",
+            "create.sql",
+            "drop.sql",
+            "merge.sql",
+            "root.nifi",
+            "queue.name",
+            "mapred.job",
+            "hadoop_nifi_be_svc.keytab",
+        ]
+        if table_lower in property_patterns:
+            return True
+
+        # Filter out file extensions (*.sql, *.json, *.xml, *.jar, etc.)
+        file_extensions = [
+            ".sql",
+            ".json",
+            ".xml",
+            ".jar",
+            ".keytab",
+            ".txt",
+            ".csv",
+            ".avro",
+            ".parquet",
+        ]
+        if any(table_lower.endswith(ext) for ext in file_extensions):
+            return True
+
+        # Filter out common property suffixes
+        if any(
+            table_lower.endswith(suffix)
+            for suffix in [".value", ".split", ".evaluateattributeexpressions"]
+        ):
+            return True
+
+        # Filter out SQL keywords
+        sql_keywords = {
             "insert",
             "select",
             "update",
@@ -299,19 +466,59 @@ class TableExtractionAnalyzer(BaseAnalyzer):
             "truncate",
             "merge",
         }
-
-        table_lower = table_name.lower()
-
-        # Check prefixes
-        if any(table_lower.startswith(fp) for fp in false_positive_prefixes):
+        if table_lower in sql_keywords:
             return True
 
-        # Check if it's just a SQL keyword
-        if table_lower in sql_keyword_tables:
+        # Filter out common generic words that appear in code
+        generic_words = {
+            "temp",
+            "script",
+            "create",
+            "arc",  # Could be code/config
+            "osd",  # Could be code/config
+        }
+        if table_lower in generic_words:
             return True
 
-        # Check if it's a single character (like just "$")
-        if len(table_name) <= 1:
+        # Filter out patterns with common variable/property naming
+        # (dateName.value, dateYmd.value, etc.)
+        if re.match(r"^date[a-z]+\.value$", table_lower):
+            return True
+
+        # Filter out Sqoop command patterns
+        if "sqoop" in table_lower:
+            return True
+
+        # Filter out SQL table aliases (t1.column, t2.column, th.column, etc.)
+        # These are alias.column references in SQL JOINs, not table names
+        # Common SQL aliases are very short (1-2 chars): t1, t2, th, hm, etc.
+        if "." in table_name:
+            parts = table_name.split(".")
+            if len(parts) == 2:
+                prefix, suffix = parts
+                prefix_lower = prefix.lower()
+
+                # Very short prefixes (1-2 chars) are almost always aliases
+                # Exception: allow common schema prefixes
+                if len(prefix) <= 2 and prefix_lower not in ["db"]:
+                    return True
+
+                # 3-char prefixes that don't look like schema names
+                if len(prefix) == 3:
+                    # Real schemas usually have underscores or longer names
+                    # Aliases are usually just letters (t1, th, hm, abc, etc.)
+                    if "_" not in prefix and not prefix.endswith("_db"):
+                        # If suffix doesn't have underscores, it's probably alias.column
+                        if "_" not in suffix:
+                            return True
+
+        # Filter out specific known file/config patterns
+        specific_false_positives = {
+            "avro.schema",
+            "site.xml",
+            "tools.jar",
+        }
+        if table_lower in specific_false_positives:
             return True
 
         return False
